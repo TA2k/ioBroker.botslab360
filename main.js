@@ -69,7 +69,9 @@ class Botslab360 extends utils.Adapter {
   async login() {
     const timestamp = Date.now();
     const signature =
-      "app=360Robotdimei=dimsi=dmac=fields=qid,username,nickname,loginemail,head_pic,mobileformat=jsonfrom=mpl_smarthome_andhead_type=qis_keep_alive=1m2=92f74f207ad7066bf3890e2c3c29cce1method=UserIntf.loginmid=c1c6fff1643a3af5bd167488ff19012dos_board=ANEos_manufacturer=HUAWEIos_model=ANE-LX1os_sdk_version=android_28password=8667024b9ae2d0d8fb80dca6d782e2efqh_id=92f74f207ad7066bf3890e2c3c29cce1quc_lang=de_DEquc_sdk_version=v1.5.16res_mode=1sdpi=3.0sec_type=boolsh=2060.0simsn=sw=1080.0ua=Dalvik/2.1.0 (Linux; U; Android 9; ANE-LX1 Build/HUAWEIANE-L21)ui_ver=2.6.2.1-alert-uiusername=" +
+      "app=360Robotdimei=dimsi=dmac=fields=qid,username,nickname,loginemail,head_pic,mobileformat=jsonfrom=mpl_smarthome_andhead_type=qis_keep_alive=1m2=92f74f207ad7066bf3890e2c3c29cce1method=UserIntf.loginmid=11aa8d2c762f3b0b56e9e9ed8d4015f0os_board=ANEos_manufacturer=HUAWEIos_model=ANE-LX1os_sdk_version=android_28password=" +
+      crypto.createHash("md5").update(this.config.password).digest("hex") +
+      "qh_id=92f74f207ad7066bf3890e2c3c29cce1quc_lang=de_DEquc_sdk_version=v1.5.16res_mode=1sdpi=3.0sec_type=boolsh=2060.0simsn=sw=1080.0ua=Dalvik/2.1.0 (Linux; U; Android 9; ANE-LX1 Build/HUAWEIANE-L21)ui_ver=2.6.2.1-alert-uiusername=" +
       this.config.username +
       "v=6.7.0.0vt_guid=" +
       timestamp +
@@ -112,31 +114,32 @@ class Botslab360 extends utils.Adapter {
       username: this.config.username,
       sdpi: "3.0",
     };
-    const loginQueryBase64 = Buffer.from(qs.stringify(loginQuery)).toString("base64");
-    const encryptedLoginQuery = JsCrypto.DES.encrypt(
-      JsCrypto.Base64.parse(loginQueryBase64),
-      JsCrypto.Base64.parse(this.key),
-      { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.NoPadding },
-    );
+
+    const encryptedLoginQuery = JsCrypto.DES.encrypt(JsCrypto.Utf8.parse(qs.stringify(loginQuery)), JsCrypto.Base64.parse(this.key), {
+      iv: JsCrypto.Base64.parse(this.key),
+      mode: JsCrypto.mode.CBC,
+      padding: JsCrypto.pad.Pkcs7,
+    });
 
     await this.requestClient({
       method: "post",
       url: "http://passport.360.cn/request.php",
       headers: {
         "User-Agent": "360accounts andv1.5.16 mpl_smarthome_and",
+        Host: "passport.360.cn",
         "Content-Type": "application/x-www-form-urlencoded",
       },
       data: qs.stringify({
         quc_lang: "de_DE",
         method: "UserIntf.login",
         from: "mpl_smarthome_and",
-        parad: encryptedLoginQuery.toString(JsCrypto.Base64),
-        key: "YcK9Z0S7GeONe6PbHr2yKTi/NMlCAiXF/gkKW3zYDfBLyIt9tP3xDAuZl40aI8UoCpLhoO0J+gpQP3foGNYWuCaqTO3fBFzcG0FSQuUmnobIkRQgEIM1co3ozvaAxkLxTTlYovTQfujRJFSveTl+7pVbCJe9FezSKMSuzP+2xMc",
+        parad: encryptedLoginQuery.toString().replace("==", ""),
+        key: "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw",
       }),
     })
       .then((res) => {
         this.log.debug(JSON.stringify(res.data));
-        if (res.data && res.data.errno !== 0) {
+        if (res.data && res.data.errno !== "0") {
           this.log.error("Login failed: " + res.data.errmsg);
           return;
         }
@@ -144,10 +147,15 @@ class Botslab360 extends utils.Adapter {
           const decrypteds = JsCrypto.DES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(res.data.ret) }),
             JsCrypto.Base64.parse(this.key),
-            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.NoPadding },
+            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
-          this.session = decrypteds.toString(JsCrypto.Utf8);
+          const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
+          if (decryptRes.errno !== "0") {
+            this.log.error("Login failed: " + res.data.errmsg);
+            return;
+          }
+          this.session.token = decryptRes.user;
         } catch (error) {
           this.log.error(error);
         }
