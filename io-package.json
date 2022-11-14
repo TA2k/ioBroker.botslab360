@@ -1,0 +1,104 @@
+{
+  "common": {
+    "name": "botslab360",
+    "version": "0.0.1",
+    "news": {
+      "0.0.1": {
+        "en": "initial release",
+        "de": "Erstveröffentlichung",
+        "ru": "Начальная версия",
+        "pt": "lançamento inicial",
+        "nl": "Eerste uitgave",
+        "fr": "Première version",
+        "it": "Versione iniziale",
+        "es": "Versión inicial",
+        "pl": "Pierwsze wydanie",
+        "zh-cn": "首次出版"
+      }
+    },
+    "title": "Botslab 360",
+    "titleLang": {
+      "en": "Botslab 360",
+      "de": "Botlab 360",
+      "ru": "Боцлаб 360",
+      "pt": "Botslab 360",
+      "nl": "Botslab 360",
+      "fr": "Botslab 360",
+      "it": "Botslab 360",
+      "es": "laboratorio de bots 360",
+      "pl": "Botslab 360",
+      "zh-cn": "机器人实验室 360"
+    },
+    "desc": {
+      "en": "Adapter for Botslab 360 Vacuum",
+      "de": "Adapter für Botslab 360 Vakuum",
+      "ru": "Адаптер для пылесоса Botslab 360",
+      "pt": "Adaptador para Botslab 360 Vacuum",
+      "nl": "Adapter voor Botslab 360 Vacuüm",
+      "fr": "Adaptateur pour aspirateur Botslab 360",
+      "it": "Adattatore per aspirapolvere Botslab 360",
+      "es": "Adaptador para aspiradora Botslab 360",
+      "pl": "Adapter do odkurzacza Botslab 360",
+      "zh-cn": "Botslab 360 真空适配器"
+    },
+    "authors": ["TA2k <tombox2020@gmail.com>"],
+    "keywords": ["360", "Vacuum", "botslab"],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "main": "main.js",
+    "icon": "botslab360.png",
+    "enabled": true,
+    "extIcon": "https://raw.githubusercontent.com/TA2k/ioBroker.botslab360/main/admin/botslab360.png",
+    "readme": "https://github.com/TA2k/ioBroker.botslab360/blob/main/README.md",
+    "loglevel": "info",
+    "mode": "daemon",
+    "type": "household",
+    "compact": true,
+    "connectionType": "cloud",
+    "dataSource": "poll",
+    "adminUI": {
+      "config": "json"
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=3.3.22"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=5.2.28"
+      }
+    ]
+  },
+  "encryptedNative": ["password"],
+  "protectedNative": ["password"],
+  "native": {
+    "username": "",
+    "password": "",
+    "interval": 10
+  },
+  "objects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": {
+        "name": "Information"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "role": "indicator.connected",
+        "name": "Device or service connected",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    }
+  ]
+}
