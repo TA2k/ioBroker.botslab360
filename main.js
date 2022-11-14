@@ -29,6 +29,8 @@ class Botslab360 extends utils.Adapter {
     this.on("unload", this.onUnload.bind(this));
     this.deviceArray = [];
     this.key = "Y2ZTXk0wb3U=";
+    this.postKey =
+      "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw";
 
     this.json2iob = new Json2iob(this);
     this.cookieJar = new tough.CookieJar();
@@ -148,7 +150,7 @@ class Botslab360 extends utils.Adapter {
         method: "UserIntf.login",
         from: "mpl_smarthome_and",
         parad: encryptedLoginQuery.toString().replace("==", ""),
-        key: "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw",
+        key: this.postKey,
       }),
     })
       .then((res) => {
@@ -173,7 +175,7 @@ class Botslab360 extends utils.Adapter {
         } catch (error) {
           this.log.error(error);
         }
-
+        this.log.info(`Login successful: ${this.session.username}`);
         this.setState("info.connection", true, true);
       })
       .catch((error) => {
