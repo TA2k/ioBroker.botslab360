@@ -12,6 +12,8 @@ const crypto = require("crypto");
 const qs = require("qs");
 const Json2iob = require("./lib/json2iob");
 const JsCrypto = require("jscrypto");
+const tough = require("tough-cookie");
+const { HttpsCookieAgent } = require("http-cookie-agent/http");
 
 class Botslab360 extends utils.Adapter {
   /**
@@ -29,7 +31,15 @@ class Botslab360 extends utils.Adapter {
     this.key = "Y2ZTXk0wb3U=";
 
     this.json2iob = new Json2iob(this);
-    this.requestClient = axios.create();
+    this.cookieJar = new tough.CookieJar();
+    this.requestClient = axios.create({
+      withCredentials: true,
+      httpsAgent: new HttpsCookieAgent({
+        cookies: {
+          jar: this.cookieJar,
+        },
+      }),
+    });
   }
 
   /**
@@ -115,11 +125,15 @@ class Botslab360 extends utils.Adapter {
       sdpi: "3.0",
     };
 
-    const encryptedLoginQuery = JsCrypto.DES.encrypt(JsCrypto.Utf8.parse(qs.stringify(loginQuery)), JsCrypto.Base64.parse(this.key), {
-      iv: JsCrypto.Base64.parse(this.key),
-      mode: JsCrypto.mode.CBC,
-      padding: JsCrypto.pad.Pkcs7,
-    });
+    const encryptedLoginQuery = JsCrypto.DES.encrypt(
+      JsCrypto.Utf8.parse(qs.stringify(loginQuery)),
+      JsCrypto.Base64.parse(this.key),
+      {
+        iv: JsCrypto.Base64.parse(this.key),
+        mode: JsCrypto.mode.CBC,
+        padding: JsCrypto.pad.Pkcs7,
+      },
+    );
 
     await this.requestClient({
       method: "post",
@@ -147,7 +161,7 @@ class Botslab360 extends utils.Adapter {
           const decrypteds = JsCrypto.DES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(res.data.ret) }),
             JsCrypto.Base64.parse(this.key),
-            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
+            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
           const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
@@ -155,7 +169,7 @@ class Botslab360 extends utils.Adapter {
             this.log.error("Login failed: " + res.data.errmsg);
             return;
           }
-          this.session.token = decryptRes.user;
+          this.session = decryptRes.user;
         } catch (error) {
           this.log.error(error);
         }
