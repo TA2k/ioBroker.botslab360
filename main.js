@@ -130,7 +130,7 @@ class Botslab360 extends utils.Adapter {
         quc_lang: "de_DE",
         method: "UserIntf.login",
         from: "mpl_smarthome_and",
-        parad: encryptedLoginQuery,
+        parad: encryptedLoginQuery.toString(JsCrypto.Base64),
         key: "YcK9Z0S7GeONe6PbHr2yKTi/NMlCAiXF/gkKW3zYDfBLyIt9tP3xDAuZl40aI8UoCpLhoO0J+gpQP3foGNYWuCaqTO3fBFzcG0FSQuUmnobIkRQgEIM1co3ozvaAxkLxTTlYovTQfujRJFSveTl+7pVbCJe9FezSKMSuzP+2xMc",
       }),
     })
