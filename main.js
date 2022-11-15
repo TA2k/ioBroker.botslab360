@@ -14,7 +14,7 @@ const Json2iob = require("./lib/json2iob");
 const JsCrypto = require("jscrypto");
 const tough = require("tough-cookie");
 const { HttpsCookieAgent } = require("http-cookie-agent/http");
-
+const { v4: uuidv4 } = require("uuid");
 class Botslab360 extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -37,6 +37,7 @@ class Botslab360 extends utils.Adapter {
     this.requestClient = axios.create({
       withCredentials: true,
       httpsAgent: new HttpsCookieAgent({
+        keepAlive: true,
         cookies: {
           jar: this.cookieJar,
         },
@@ -67,11 +68,11 @@ class Botslab360 extends utils.Adapter {
 
     this.log.info("Login to 360");
     await this.login();
-    if (this.session.token) {
+    if (this.session.username) {
       await this.getDeviceList();
       await this.updateDevices();
       this.updateInterval = setInterval(async () => {
-        await this.updateDevices();
+        // await this.updateDevices();
       }, this.config.interval * 60 * 1000);
     }
     this.refreshTokenInterval = setInterval(() => {
@@ -175,10 +176,34 @@ class Botslab360 extends utils.Adapter {
         } catch (error) {
           this.log.error(error);
         }
+      })
+      .catch((error) => {
+        this.log.error(error);
+        error.response && this.log.error(JSON.stringify(error.response.data));
+      });
+    await this.requestClient({
+      method: "post",
+      url:
+        "https://q.smart.360.cn/common/user/login?form=mpc_smarthome_and&clientInfo={%22model%22:%22ANE-LX1%22,%22imei%22:%2252f72d202af7162ac2810e5c2c01cce2%22,%22brand%22:%22HUAWEI%22}&phoneNum=&taskid=" +
+        uuidv4() +
+        "&channel_id=default",
+      headers: {
+        "User-Agent": "com.qihoo.smarthome",
+        Host: "q.smart.360.cn",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      data: null,
+    })
+      .then((res) => {
+        this.log.debug(JSON.stringify(res.data));
+        if (res.data && res.data.errno !== "0") {
+          this.log.error("Login failed: " + res.data.errmsg);
+          return;
+        }
         this.log.info(`Login successful: ${this.session.username}`);
         this.setState("info.connection", true, true);
       })
-      .catch((error) => {
+      .catch(async (error) => {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
@@ -187,41 +212,35 @@ class Botslab360 extends utils.Adapter {
   async getDeviceList() {
     await this.requestClient({
       method: "post",
-      url: "https://smartapi.vesync.com/cloud/v2/deviceManaged/devices",
+      url: "https://q.smart.360.cn/common/dev/GetList",
       headers: {
-        tk: this.session.token,
-        accountid: this.session.accountID,
-        "content-type": "application/json",
-        tz: "Europe/Berlin",
-        "user-agent": "ioBroker",
+        Host: "q.smart.360.cn",
+        "User-Agent": "okhttp/3.8.1",
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-      data: JSON.stringify({
-        acceptLanguage: "de",
-        accountID: this.session.accountID,
-        appVersion: "1.1",
-        method: "devices",
-        pageNo: 1,
-        pageSize: 1000,
-        phoneBrand: "ioBroker",
-        phoneOS: "ioBroker",
-        timeZone: "Europe/Berlin",
-        token: this.session.token,
-        traceId: "",
+      data: qs.stringify({
+        taskid: uuidv4(),
+        from: "mpc_and",
+        devType: "3",
+        channel_id: "",
+        appVer: "6.7.0.0",
+        lang: "de_DE",
       }),
     })
       .then(async (res) => {
+        if (res.data && res.data.errno !== "0") {
+          this.log.error("Login failed: " + res.data.errmsg);
+          return;
+        }
         this.log.debug(JSON.stringify(res.data));
-        if (res.data.result && res.data.result.list) {
-          this.log.info(`Found ${res.data.result.list.length} devices`);
-          for (const device of res.data.result.list) {
+        if (res.data.data && res.data.data.list) {
+          this.log.info(`Found ${res.data.data.list.length} devices`);
+          for (const device of res.data.data.list) {
             this.log.debug(JSON.stringify(device));
-            const id = device.cid;
-            // if (device.subDeviceNo) {
-            //   id += "." + device.subDeviceNo;
-            // }
+            const id = device.sn;
 
-            this.deviceArray.push(device);
-            const name = device.deviceName;
+            this.deviceArray.push(id);
+            const name = device.title + " " + device.hardware;
 
             await this.setObjectNotExistsAsync(id, {
               type: "device",
@@ -240,13 +259,11 @@ class Botslab360 extends utils.Adapter {
 
             const remoteArray = [
               { command: "Refresh", name: "True = Refresh" },
-              { command: "setSwitch", name: "True = Switch On, False = Switch Off" },
-              { command: "setDisplay", name: "True = On, False = Off" },
-              { command: "setChildLock", name: "True = On, False = Off" },
-              { command: "setPurifierMode", name: "sleep or auto", def: "auto", type: "string", role: "text" },
-              { command: "setTargetHumidity", name: "set Target Humidity", type: "number", def: 65, role: "level" },
-              { command: "setLevel-mist", name: "set Level Mist", type: "number", def: 10, role: "level" },
-              { command: "setLevel-wind", name: "set Level Wind", type: "number", def: 10, role: "level" },
+              { command: "start", name: "Start" },
+              { command: "smartClean", name: "smartClean" },
+              { command: "auto", name: "Auto Mode" },
+              { command: "quiet", name: "Quiet Mode" },
+              { command: "strong", name: "Strong Mode" },
             ];
             remoteArray.forEach((remote) => {
               this.setObjectNotExists(id + ".remote." + remote.command, {
@@ -275,7 +292,7 @@ class Botslab360 extends utils.Adapter {
   async updateDevices() {
     const statusArray = [
       {
-        url: "https://smartapi.vesync.com/cloud/v2/deviceManaged/bypassV2",
+        url: "https://q.smart.360.cn/clean/cmd/",
         path: "status",
         desc: "Status of the device",
       },
@@ -287,32 +304,21 @@ class Botslab360 extends utils.Adapter {
 
         await this.requestClient({
           method: "post",
-          url: element.url,
+          url: "https://q.smart.360.cn/clean/cmd/send",
           headers: {
-            "content-type": "application/json",
-            "user-agent": "ioBroker",
-            accept: "*/*",
+            "User-Agent": "okhttp/3.8.1",
+            "Content-Type": "application/x-www-form-urlencoded",
           },
-          data: JSON.stringify({
-            accountID: this.session.accountID,
-            method: "bypassV2",
-            deviceRegion: "EU",
-            phoneOS: "iOS 14.8",
-            timeZone: "Europe/Berlin",
-            debugMode: false,
-            cid: device.cid,
-            payload: {
-              method: this.deviceIdentifier(device),
-              data: {},
-              source: "APP",
-            },
-            configModule: "",
-            traceId: Date.now(),
-            phoneBrand: "iPhone 8 Plus",
-            acceptLanguage: "de",
-            appVersion: "VeSync 4.1.10 build2",
-            userCountryCode: "DE",
-            token: this.session.token,
+          data: qs.stringify({
+            sn: device,
+            infoType: "30000",
+            data: '{"cmds":[{"data":{},"infoType":"20001"},{"data":{},"infoType":"21014"},{"data":{"mask":0,"startPos":0,"userId":0},"infoType":"21011"}],"mainCmds":[]}',
+            taskid: uuidv4(),
+            from: "mpc_and",
+            devType: "3",
+            channel_id: "",
+            appVer: "6.7.0.0",
+            lang: "de_DE",
           }),
         })
           .then(async (res) => {
@@ -412,67 +418,27 @@ class Botslab360 extends utils.Adapter {
           this.updateDevices();
           return;
         }
-        let data = {
-          enabled: state.val,
-          id: 0,
-        };
-        if (command === "setTargetHumidity") {
-          data = {
-            target_humidity: state.val,
-          };
-        }
-        if (command === "setDisplay") {
-          data = {
-            state: state.val,
-          };
-        }
-        if (command === "setPurifierMode") {
-          data = {
-            mode: state.val,
-          };
-        }
-        if (command === "setChildLock") {
-          data = {
-            child_lock: state.val,
-          };
-        }
-        if (command === "setLevel") {
-          data = {
-            level: state.val,
-            type: type,
-            id: 0,
-          };
-        }
+
         await this.requestClient({
           method: "post",
-          url: "https://smartapi.vesync.com/cloud/v2/deviceManaged/bypassV2",
+          url: "https://q.smart.360.cn/clean/cmd/send",
           headers: {
-            Host: "smartapi.vesync.com",
-            accept: "*/*",
-            "content-type": "application/json",
-            "user-agent": "VeSync/4.1.10 (com.etekcity.vesyncPlatform; build:2; iOS 14.8.0) Alamofire/5.2.1",
-            "accept-language": "de-DE;q=1.0, uk-DE;q=0.9, en-DE;q=0.8",
+            Host: "q.smart.360.cn",
+            "User-Agent": "okhttp/3.12.0",
+            "Content-Type": "application/x-www-form-urlencoded",
           },
-          data: JSON.stringify({
-            traceId: Date.now(),
-            debugMode: false,
-            acceptLanguage: "de",
-            method: "bypassV2",
-            cid: deviceId,
-            timeZone: "Europe/Berlin",
-            accountID: this.session.accountID,
-            payload: {
-              data: data,
-              source: "APP",
-              method: command,
-            },
-            appVersion: "VeSync 4.1.10 build2",
-            deviceRegion: "EU",
-            phoneBrand: "iPhone 8 Plus",
-            token: this.session.token,
-            phoneOS: "iOS 14.8",
-            configModule: "",
-            userCountryCode: "DE",
+          data: qs.stringify({
+            sn: deviceId,
+            infoType: "21012",
+            data: '{"cmd":"' + command + '"}',
+            taskid: uuidv4(),
+            from: "mpc_and",
+            devType: "3",
+            channel_id: "Overseas",
+            appVer: "11.0.5",
+            lang: "de_DE",
+            model: "ANE-LX1",
+            manufacturer: "HUAWEI",
           }),
         })
           .then((res) => {
@@ -484,7 +450,7 @@ class Botslab360 extends utils.Adapter {
           });
         this.refreshTimeout = setTimeout(async () => {
           this.log.info("Update devices");
-          await this.updateDevices();
+          // await this.updateDevices();
         }, 10 * 1000);
       } else {
         const resultDict = {
