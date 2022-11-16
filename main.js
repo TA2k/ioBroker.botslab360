@@ -12,9 +12,8 @@ const crypto = require("crypto");
 const qs = require("qs");
 const Json2iob = require("./lib/json2iob");
 const JsCrypto = require("jscrypto");
-const tough = require("tough-cookie");
-const { HttpsCookieAgent } = require("http-cookie-agent/http");
 const { v4: uuidv4 } = require("uuid");
+
 class Botslab360 extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -33,16 +32,7 @@ class Botslab360 extends utils.Adapter {
       "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw";
 
     this.json2iob = new Json2iob(this);
-    this.cookieJar = new tough.CookieJar();
-    this.requestClient = axios.create({
-      withCredentials: true,
-      httpsAgent: new HttpsCookieAgent({
-        keepAlive: true,
-        cookies: {
-          jar: this.cookieJar,
-        },
-      }),
-    });
+    this.requestClient = axios.create();
   }
 
   /**
@@ -128,15 +118,11 @@ class Botslab360 extends utils.Adapter {
       sdpi: "3.0",
     };
 
-    const encryptedLoginQuery = JsCrypto.DES.encrypt(
-      JsCrypto.Utf8.parse(qs.stringify(loginQuery)),
-      JsCrypto.Base64.parse(this.key),
-      {
-        iv: JsCrypto.Base64.parse(this.key),
-        mode: JsCrypto.mode.CBC,
-        padding: JsCrypto.pad.Pkcs7,
-      },
-    );
+    const encryptedLoginQuery = JsCrypto.DES.encrypt(JsCrypto.Utf8.parse(qs.stringify(loginQuery)), JsCrypto.Base64.parse(this.key), {
+      iv: JsCrypto.Base64.parse(this.key),
+      mode: JsCrypto.mode.CBC,
+      padding: JsCrypto.pad.Pkcs7,
+    });
 
     await this.requestClient({
       method: "post",
@@ -164,7 +150,7 @@ class Botslab360 extends utils.Adapter {
           const decrypteds = JsCrypto.DES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(res.data.ret) }),
             JsCrypto.Base64.parse(this.key),
-            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
+            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
           const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
@@ -173,6 +159,7 @@ class Botslab360 extends utils.Adapter {
             return;
           }
           this.session = decryptRes.user;
+          // this.cookieJar.store.idx["360.cn"]["/"].T.httpOnly = false;
         } catch (error) {
           this.log.error(error);
         }
@@ -181,26 +168,46 @@ class Botslab360 extends utils.Adapter {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
+    const data = qs.stringify({
+      form: "mpc_and",
+      clientInfo: '{"model":"ANE-LX1","imei":"92f74f207ad7066bf3890e2c3c29cce1","brand":"HUAWEI"}',
+      phoneNum: "",
+      taskid: "455fc673-ee15-4be1-9d51-7ab5eb47c650",
+      from: "mpc_and",
+      devType: "3",
+      channel_id: "Overseas",
+      appVer: "11.0.5",
+      lang: "de_DE",
+      model: "ANE-LX1",
+      manufacturer: "HUAWEI",
+    });
     await this.requestClient({
       method: "post",
-      url:
-        "https://q.smart.360.cn/common/user/login?form=mpc_smarthome_and&clientInfo={%22model%22:%22ANE-LX1%22,%22imei%22:%2252f72d202af7162ac2810e5c2c01cce2%22,%22brand%22:%22HUAWEI%22}&phoneNum=&taskid=" +
-        uuidv4() +
-        "&channel_id=default",
+      url: "https://q.smart.360.cn/common/user/login",
       headers: {
-        "User-Agent": "com.qihoo.smarthome",
-        Host: "q.smart.360.cn",
         "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "*/*",
+        Connection: "keep-alive",
+        Cookie: "q=" + decodeURIComponent(this.session.q) + ";t=" + decodeURIComponent(this.session.t) + ";qid=" + this.session.qid,
+        "User-Agent": "qhsa-iphone-11.1.0",
+        "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
       },
-      data: null,
+      data: qs.stringify({
+        clientInfo:
+          '{"release":"appstore","brand":"iPhone","model":"iPhone10,5","notifyId":"aa0ad645269de676a5ee6a728ba13b777ed3d4aa4d0e08a578097fbe78768b02","lang":"de_DE","imei":"f3bc82b802bd91a51d0dcc6499efeba3"}',
+        lang: "de_DE",
+        phoneNum: "",
+        taskid: uuidv4(),
+      }),
     })
       .then((res) => {
         this.log.debug(JSON.stringify(res.data));
-        if (res.data && res.data.errno !== "0") {
+        if (res.data && res.data.errno !== 0) {
           this.log.error("Login failed: " + res.data.errmsg);
           return;
         }
         this.log.info(`Login successful: ${this.session.username}`);
+        this.session.sid = res.data.data.sid;
         this.setState("info.connection", true, true);
       })
       .catch(async (error) => {
@@ -214,22 +221,32 @@ class Botslab360 extends utils.Adapter {
       method: "post",
       url: "https://q.smart.360.cn/common/dev/GetList",
       headers: {
-        Host: "q.smart.360.cn",
-        "User-Agent": "okhttp/3.8.1",
         "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "*/*",
+        Connection: "keep-alive",
+        Cookie:
+          "q=" +
+          decodeURIComponent(this.session.q) +
+          ";t=" +
+          decodeURIComponent(this.session.t) +
+          ";qid=" +
+          this.session.qid +
+          ";sid=" +
+          this.session.sid,
+        "User-Agent": "QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)",
+        "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
       },
       data: qs.stringify({
-        taskid: uuidv4(),
-        from: "mpc_and",
+        countryId: "DE",
         devType: "3",
-        channel_id: "",
-        appVer: "6.7.0.0",
+        from: "mpc_ios",
         lang: "de_DE",
+        taskid: uuidv4(),
       }),
     })
       .then(async (res) => {
-        if (res.data && res.data.errno !== "0") {
-          this.log.error("Login failed: " + res.data.errmsg);
+        if (res.data && res.data.errno !== 0) {
+          this.log.error("Device list failed: " + res.data.errmsg);
           return;
         }
         this.log.debug(JSON.stringify(res.data));
@@ -259,11 +276,16 @@ class Botslab360 extends utils.Adapter {
 
             const remoteArray = [
               { command: "Refresh", name: "True = Refresh" },
-              { command: "start", name: "Start" },
-              { command: "smartClean", name: "smartClean" },
-              { command: "auto", name: "Auto Mode" },
-              { command: "quiet", name: "Quiet Mode" },
-              { command: "strong", name: "Strong Mode" },
+              { command: "start-21012", name: "Start Charging" },
+              { command: "smartClean-21005", name: "Start Cleaning" },
+              { command: "pause-21017", name: "Pause" },
+              { command: "continue-21017", name: "Continue" },
+              { command: "auto-21022", name: "Auto Mode" },
+              { command: "quiet-21022", name: "Quiet Mode" },
+              { command: "strong-21022", name: "Strong Mode" },
+              { command: "21015", name: "getConsumableInfo" },
+              { command: "20001", name: "Unknown" },
+              { command: "20034", name: "Unknown" },
             ];
             remoteArray.forEach((remote) => {
               this.setObjectNotExists(id + ".remote." + remote.command, {
@@ -306,19 +328,30 @@ class Botslab360 extends utils.Adapter {
           method: "post",
           url: "https://q.smart.360.cn/clean/cmd/send",
           headers: {
-            "User-Agent": "okhttp/3.8.1",
             "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "*/*",
+            Connection: "keep-alive",
+            Cookie:
+              "q=" +
+              decodeURIComponent(this.session.q) +
+              ";t=" +
+              decodeURIComponent(this.session.t) +
+              ";qid=" +
+              this.session.qid +
+              ";sid=" +
+              this.session.sid,
+            "User-Agent": "QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)",
+            "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
           },
           data: qs.stringify({
-            sn: device,
-            infoType: "30000",
-            data: '{"cmds":[{"data":{},"infoType":"20001"},{"data":{},"infoType":"21014"},{"data":{"mask":0,"startPos":0,"userId":0},"infoType":"21011"}],"mainCmds":[]}',
-            taskid: uuidv4(),
-            from: "mpc_and",
+            countryId: "DE",
+            data: "",
             devType: "3",
-            channel_id: "",
-            appVer: "6.7.0.0",
+            from: "mpc_ios",
+            infoType: "21015",
             lang: "de_DE",
+            sn: device,
+            taskid: uuidv4(),
           }),
         })
           .then(async (res) => {
@@ -326,19 +359,15 @@ class Botslab360 extends utils.Adapter {
             if (!res.data) {
               return;
             }
-            if (res.data.code != 0) {
-              this.log.error(JSON.stringify(res.data));
+            if (res.data && res.data.errno !== 0) {
+              this.log.error("Update failed: " + res.data.errmsg);
               return;
             }
-            let data = res.data.result;
-            if (data.result) {
-              data = data.result;
-            }
-
+            const data = res.data.data;
             const forceIndex = true;
             const preferedArrayName = null;
 
-            this.json2iob.parse(device.cid + "." + element.path, data, {
+            this.json2iob.parse(device + "." + element.path, data, {
               forceIndex: forceIndex,
               write: true,
               preferedArrayName: preferedArrayName,
@@ -411,37 +440,64 @@ class Botslab360 extends utils.Adapter {
       if (!state.ack) {
         const deviceId = id.split(".")[2];
         let command = id.split(".")[4];
-        const type = command.split("-")[1];
+        let type = command.split("-")[1];
         command = command.split("-")[0];
 
         if (id.split(".")[4] === "Refresh") {
           this.updateDevices();
           return;
         }
-
+        let data = "";
+        if (isNaN(Number(command))) {
+          data = '{"cmd":"' + command + '"}';
+        } else {
+          type = command;
+        }
+        if (type === "21005") {
+          data = '{"mode":"smartClean","globalCleanTimes":1}';
+        }
         await this.requestClient({
           method: "post",
           url: "https://q.smart.360.cn/clean/cmd/send",
           headers: {
-            Host: "q.smart.360.cn",
-            "User-Agent": "okhttp/3.12.0",
             "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "*/*",
+            Connection: "keep-alive",
+            Cookie:
+              "q=" +
+              decodeURIComponent(this.session.q) +
+              ";t=" +
+              decodeURIComponent(this.session.t) +
+              ";qid=" +
+              this.session.qid +
+              ";sid=" +
+              this.session.sid,
+            "User-Agent": "QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)",
+            "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
           },
           data: qs.stringify({
-            sn: deviceId,
-            infoType: "21012",
-            data: '{"cmd":"' + command + '"}',
-            taskid: uuidv4(),
-            from: "mpc_and",
+            countryId: "DE",
+            data: data,
             devType: "3",
-            channel_id: "Overseas",
-            appVer: "11.0.5",
+            from: "mpc_ios",
+            infoType: type,
             lang: "de_DE",
-            model: "ANE-LX1",
-            manufacturer: "HUAWEI",
+            sn: deviceId,
+            taskid: uuidv4(),
           }),
         })
           .then((res) => {
+            if (res.data && res.data.errno === 102) {
+              this.log.warn(res.data.errmsg);
+              this.log.info("Relogin in 60 seconds");
+              this.reLoginTimeout = setTimeout(async () => {
+                this.log.info("Start relogin");
+                await this.login();
+                this.log.info("Retry command");
+                this.setStateAsync(id, true, true);
+              }, 1000 * 60);
+              return;
+            }
             this.log.info(JSON.stringify(res.data));
           })
           .catch(async (error) => {
