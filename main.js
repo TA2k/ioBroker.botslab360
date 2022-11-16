@@ -118,11 +118,15 @@ class Botslab360 extends utils.Adapter {
       sdpi: "3.0",
     };
 
-    const encryptedLoginQuery = JsCrypto.DES.encrypt(JsCrypto.Utf8.parse(qs.stringify(loginQuery)), JsCrypto.Base64.parse(this.key), {
-      iv: JsCrypto.Base64.parse(this.key),
-      mode: JsCrypto.mode.CBC,
-      padding: JsCrypto.pad.Pkcs7,
-    });
+    const encryptedLoginQuery = JsCrypto.DES.encrypt(
+      JsCrypto.Utf8.parse(qs.stringify(loginQuery)),
+      JsCrypto.Base64.parse(this.key),
+      {
+        iv: JsCrypto.Base64.parse(this.key),
+        mode: JsCrypto.mode.CBC,
+        padding: JsCrypto.pad.Pkcs7,
+      },
+    );
 
     await this.requestClient({
       method: "post",
@@ -150,7 +154,7 @@ class Botslab360 extends utils.Adapter {
           const decrypteds = JsCrypto.DES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(res.data.ret) }),
             JsCrypto.Base64.parse(this.key),
-            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
+            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
           const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
@@ -168,19 +172,7 @@ class Botslab360 extends utils.Adapter {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
-    const data = qs.stringify({
-      form: "mpc_and",
-      clientInfo: '{"model":"ANE-LX1","imei":"92f74f207ad7066bf3890e2c3c29cce1","brand":"HUAWEI"}',
-      phoneNum: "",
-      taskid: "455fc673-ee15-4be1-9d51-7ab5eb47c650",
-      from: "mpc_and",
-      devType: "3",
-      channel_id: "Overseas",
-      appVer: "11.0.5",
-      lang: "de_DE",
-      model: "ANE-LX1",
-      manufacturer: "HUAWEI",
-    });
+
     await this.requestClient({
       method: "post",
       url: "https://q.smart.360.cn/common/user/login",
@@ -188,7 +180,13 @@ class Botslab360 extends utils.Adapter {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "*/*",
         Connection: "keep-alive",
-        Cookie: "q=" + decodeURIComponent(this.session.q) + ";t=" + decodeURIComponent(this.session.t) + ";qid=" + this.session.qid,
+        Cookie:
+          "q=" +
+          decodeURIComponent(this.session.q) +
+          ";t=" +
+          decodeURIComponent(this.session.t) +
+          ";qid=" +
+          this.session.qid,
         "User-Agent": "qhsa-iphone-11.1.0",
         "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
       },

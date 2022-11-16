@@ -15,6 +15,18 @@
 
 Adapter for Botslab 360 Vacuum
 
+## Steuern
+
+Unter remote können Befehle gesendet werden.
+
+## Status
+
+Status Abruf funktioniert derzeit nicht da die Daten nicht sichtbar zurückgesendet werden
+
+## Fragen und Diskussion
+
+<https://forum.iobroker.net/topic/60046/test-adapter-360-staubsauger-botslab>
+
 ## Changelog
 
 ### 0.0.1
