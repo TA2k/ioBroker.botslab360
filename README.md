@@ -21,7 +21,7 @@ Unter remote können Befehle gesendet werden.
 
 ## Status
 
-Status Abruf funktioniert derzeit nicht da die Daten nicht sichtbar zurückgesendet werden
+Status Abruf für verbrauchsgüter und karte muss manuell getriggert werden
 
 ## Fragen und Diskussion
 
