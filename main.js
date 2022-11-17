@@ -31,7 +31,7 @@ class Botslab360 extends utils.Adapter {
     this.key = "Y2ZTXk0wb3U=";
     this.postKey =
       "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw";
-
+    this.buffer=""
     this.json2iob = new Json2iob(this);
     this.requestClient = axios.create();
   }
@@ -63,7 +63,7 @@ class Botslab360 extends utils.Adapter {
       await this.getDeviceList();
       await this.updateDevices();
       this.updateInterval = setInterval(async () => {
-        // await this.updateDevices();
+         await this.updateDevices();
       }, this.config.interval * 60 * 1000);
     }
     this.refreshTokenInterval = setInterval(() => {
@@ -218,6 +218,8 @@ class Botslab360 extends utils.Adapter {
     }
     this.client.on("connect", () => {
       this.log.debug("connect");
+      this.reconnecting=false
+      clearTimeout(this.reconnectTCP)
       this.client.write(`\x00\x05\x00\x02\x00Ecv:1.7\n`);
       this.client.write(`t:30\n`);
       this.client.write(`u:${this.session.sid}@60009\n`);
@@ -226,19 +228,28 @@ class Botslab360 extends utils.Adapter {
       this.pingInterval && clearInterval(this.pingInterval);
       this.pingInterval = setInterval(() => {
         this.log.debug("ping");
-        // this.client.write(`\x00\x05\x00\x00`);
-      }, 60000);
+         this.client.write(`\x00\x05\x00\x00`);
+      }, 25000);
     });
     this.client.on("data", (data) => {
       this.log.debug("data");
-      const dataString = data.toString();
+      let dataString = data.toString();
       this.log.debug(dataString);
-      if (dataString.includes("ack:")) {
+      if (dataString.includes("ack:") || this.buffer) {
         try {
-          const ack = dataString.split("ack:")[1].split("\x00")[0];
+          if (dataString.includes("}")) {
+           dataString= this.buffer+dataString;
+            this.buffer="";
+          } else {
+            this.buffer += dataString;
+            return;
+          }
+          const ack = Buffer.from(dataString.substring(0,dataString.indexOf("\x00",5)))
+          ack[3]=4
           const payload = dataString.split('data":"')[1].split('",')[0];
 
           this.log.debug(ack);
+          this.client.write(ack);
           // this.client.write(`\x00\x05\x00\x04\x00\x09ack:${ack}`);
           // this.client.write(`\x00\x05\x00\x04\x00	ack:${ack}`);
           // this.client.write(`\x00\x05\x00\x00`);
@@ -260,9 +271,14 @@ class Botslab360 extends utils.Adapter {
     });
     this.client.on("close", () => {
       this.log.debug("close");
-      setTimeout(() => {
+      if (this.reconnecting) {
+        return
+      }
+      this.reconnectTCP && clearTimeout(this.reconnectTCP);
+      this.reconnectTCP = setTimeout(() => {
         this.log.debug("reconnect");
         this.connectTcp();
+        this.reconnecting = true;
       }, 10000);
     });
     this.client.on("error", (error) => {
@@ -339,8 +355,7 @@ class Botslab360 extends utils.Adapter {
               { command: "strong-21022", name: "Strong Mode" },
               { command: "21015", name: "getConsumableInfo" },
               { command: "20001", name: "getStatus" },
-              { command: "20002", name: "getMap" },
-              { command: "20034", name: "Unknown" },
+              { command: "30000", name: "getMap" },
             ];
             remoteArray.forEach((remote) => {
               this.setObjectNotExists(id + ".remote." + remote.command, {
@@ -489,6 +504,10 @@ class Botslab360 extends utils.Adapter {
         if (type === "21005") {
           data = '{"mode":"smartClean","globalCleanTimes":1}';
         }
+        if (type === "30000") {
+          data = '{"cmds":[{"data":{},"infoType":"20001"},{"data":{},"infoType":"21014"},{"data":{"mask":0,"startPos":0,"userId":0},"infoType":"21011"}],"mainCmds":[]}';
+        
+        }
         await this.requestClient({
           method: "post",
           url: "https://q.smart.360.cn/clean/cmd/send",
@@ -522,13 +541,13 @@ class Botslab360 extends utils.Adapter {
           .then((res) => {
             if (res.data && res.data.errno === 102) {
               this.log.warn(res.data.errmsg);
-              this.log.info("Relogin in 60 seconds");
+              this.log.info("Relogin in 10 seconds");
               this.reLoginTimeout = setTimeout(async () => {
                 this.log.info("Start relogin");
                 await this.login();
                 this.log.info("Retry command");
-                this.setStateAsync(id, true, true);
-              }, 1000 * 60);
+                this.setStateAsync(id, true, false);
+              }, 1000 * 10);
               return;
             }
             this.log.info(JSON.stringify(res.data));
@@ -537,10 +556,7 @@ class Botslab360 extends utils.Adapter {
             this.log.error(error);
             error.response && this.log.error(JSON.stringify(error.response.data));
           });
-        this.refreshTimeout = setTimeout(async () => {
-          this.log.info("Update devices");
-          // await this.updateDevices();
-        }, 10 * 1000);
+    
       } else {
         const resultDict = {
           auto_target_humidity: "setTargetHumidity",
