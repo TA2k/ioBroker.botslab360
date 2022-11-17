@@ -31,6 +31,7 @@ class Botslab360 extends utils.Adapter {
     this.mid = this.randomString(32);
     this.m2 = this.randomString(32);
     this.key = "Y2ZTXk0wb3U=";
+
     this.postKey =
       "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw";
     this.buffer = "";
@@ -127,11 +128,15 @@ class Botslab360 extends utils.Adapter {
       sdpi: "3.0",
     };
 
-    const encryptedLoginQuery = JsCrypto.DES.encrypt(JsCrypto.Utf8.parse(qs.stringify(loginQuery)), JsCrypto.Base64.parse(this.key), {
-      iv: JsCrypto.Base64.parse(this.key),
-      mode: JsCrypto.mode.CBC,
-      padding: JsCrypto.pad.Pkcs7,
-    });
+    const encryptedLoginQuery = JsCrypto.DES.encrypt(
+      JsCrypto.Utf8.parse(qs.stringify(loginQuery)),
+      JsCrypto.Base64.parse(this.key),
+      {
+        iv: JsCrypto.Base64.parse(this.key),
+        mode: JsCrypto.mode.CBC,
+        padding: JsCrypto.pad.Pkcs7,
+      },
+    );
 
     await this.requestClient({
       method: "post",
@@ -159,7 +164,7 @@ class Botslab360 extends utils.Adapter {
           const decrypteds = JsCrypto.DES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(res.data.ret) }),
             JsCrypto.Base64.parse(this.key),
-            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
+            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
           const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
@@ -185,7 +190,13 @@ class Botslab360 extends utils.Adapter {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "*/*",
         Connection: "keep-alive",
-        Cookie: "q=" + decodeURIComponent(this.session.q) + ";t=" + decodeURIComponent(this.session.t) + ";qid=" + this.session.qid,
+        Cookie:
+          "q=" +
+          decodeURIComponent(this.session.q) +
+          ";t=" +
+          decodeURIComponent(this.session.t) +
+          ";qid=" +
+          this.session.qid,
         "User-Agent": "qhsa-iphone-11.1.0",
         "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
       },
@@ -259,19 +270,19 @@ class Botslab360 extends utils.Adapter {
 
           this.log.debug(ack);
           this.client.write(ack);
-          // this.client.write(`\x00\x05\x00\x04\x00\x09ack:${ack}`);
-          // this.client.write(`\x00\x05\x00\x04\x00	ack:${ack}`);
-          // this.client.write(`\x00\x05\x00\x00`);
           const key = Buffer.from(this.session.pushKey.substring(0, 16)).toString("base64");
           const decrypteds = JsCrypto.AES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(payload) }),
             JsCrypto.Base64.parse(key),
-            { iv: JsCrypto.Base64.parse(key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
+            { iv: JsCrypto.Base64.parse(key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
           const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
           const body = JSON.parse(decryptRes.data);
-          this.json2iob.parse(decryptRes.sn + ".status", body.data, { forceIndex: true, channelName: "Status of the device" });
+          this.json2iob.parse(decryptRes.sn + ".status", body.data, {
+            forceIndex: true,
+            channelName: "Status of the device",
+          });
         } catch (error) {
           this.log.error(error);
           this.log.error(error.stack);
