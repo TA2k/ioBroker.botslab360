@@ -28,10 +28,12 @@ class Botslab360 extends utils.Adapter {
     this.on("stateChange", this.onStateChange.bind(this));
     this.on("unload", this.onUnload.bind(this));
     this.deviceArray = [];
+    this.mid = this.randomString(32);
+    this.m2 = this.randomString(32);
     this.key = "Y2ZTXk0wb3U=";
     this.postKey =
       "HSadyl6XNcuI/ZONGFle0v24qDnm2ln9gXSDH5+X86quoFd9+CAlC3LGF682CycmulYGWDcb2LmooVITfiqOuMVFTPKrKVzVglifYOpTimnxS0lkta9sN/Rfr7kR2U5k6SeHx18qk8PaYNkzs77qh2bgVQFisJVy51dY5Gnc7dw";
-    this.buffer=""
+    this.buffer = "";
     this.json2iob = new Json2iob(this);
     this.requestClient = axios.create();
   }
@@ -63,7 +65,7 @@ class Botslab360 extends utils.Adapter {
       await this.getDeviceList();
       await this.updateDevices();
       this.updateInterval = setInterval(async () => {
-         await this.updateDevices();
+        await this.updateDevices();
       }, this.config.interval * 60 * 1000);
     }
     this.refreshTokenInterval = setInterval(() => {
@@ -73,9 +75,15 @@ class Botslab360 extends utils.Adapter {
   async login() {
     const timestamp = Date.now();
     const signature =
-      "app=360Robotdimei=dimsi=dmac=fields=qid,username,nickname,loginemail,head_pic,mobileformat=jsonfrom=mpl_smarthome_andhead_type=qis_keep_alive=1m2=92f74f207ad7066bf3890e2c3c29cce1method=UserIntf.loginmid=11aa8d2c762f3b0b56e9e9ed8d4015f0os_board=ANEos_manufacturer=HUAWEIos_model=ANE-LX1os_sdk_version=android_28password=" +
+      "app=360Robotdimei=dimsi=dmac=fields=qid,username,nickname,loginemail,head_pic,mobileformat=jsonfrom=mpl_smarthome_andhead_type=qis_keep_alive=1m2=" +
+      this.m2 +
+      "method=UserIntf.loginmid=" +
+      this.mid +
+      "os_board=ANEos_manufacturer=HUAWEIos_model=ANE-LX1os_sdk_version=android_28password=" +
       crypto.createHash("md5").update(this.config.password).digest("hex") +
-      "qh_id=92f74f207ad7066bf3890e2c3c29cce1quc_lang=de_DEquc_sdk_version=v1.5.16res_mode=1sdpi=3.0sec_type=boolsh=2060.0simsn=sw=1080.0ua=Dalvik/2.1.0 (Linux; U; Android 9; ANE-LX1 Build/HUAWEIANE-L21)ui_ver=2.6.2.1-alert-uiusername=" +
+      "qh_id=" +
+      this.m2 +
+      "quc_lang=de_DEquc_sdk_version=v1.5.16res_mode=1sdpi=3.0sec_type=boolsh=2060.0simsn=sw=1080.0ua=Dalvik/2.1.0 (Linux; U; Android 9; ANE-LX1 Build/HUAWEIANE-L21)ui_ver=2.6.2.1-alert-uiusername=" +
       this.config.username +
       "v=6.7.0.0vt_guid=" +
       timestamp +
@@ -86,7 +94,7 @@ class Botslab360 extends utils.Adapter {
     const loginQuery = {
       dmac: "",
       os_sdk_version: "android_28",
-      mid: "11aa8d2c762f3b0b56e9e9ed8d4015f0",
+      mid: this.mid,
       quc_sdk_version: "v1.5.16",
       ua: "Dalvik/2.1.0 (Linux; U; Android 9; ANE-LX1 Build/HUAWEIANE-L21)",
       os_manufacturer: "HUAWEI",
@@ -106,9 +114,9 @@ class Botslab360 extends utils.Adapter {
       method: "UserIntf.login",
       res_mode: "1",
       sw: "1080.0",
-      m2: "92f74f207ad7066bf3890e2c3c29cce1",
+      m2: this.m2,
       format: "json",
-      qh_id: "92f74f207ad7066bf3890e2c3c29cce1",
+      qh_id: this.m2,
       dimsi: "",
       sec_type: "bool",
       v: "6.7.0.0",
@@ -169,6 +177,7 @@ class Botslab360 extends utils.Adapter {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
+
     await this.requestClient({
       method: "post",
       url: "https://q.smart.360.cn/common/user/login",
@@ -218,8 +227,8 @@ class Botslab360 extends utils.Adapter {
     }
     this.client.on("connect", () => {
       this.log.debug("connect");
-      this.reconnecting=false
-      clearTimeout(this.reconnectTCP)
+      this.reconnecting = false;
+      clearTimeout(this.reconnectTCP);
       this.client.write(`\x00\x05\x00\x02\x00Ecv:1.7\n`);
       this.client.write(`t:30\n`);
       this.client.write(`u:${this.session.sid}@60009\n`);
@@ -228,7 +237,7 @@ class Botslab360 extends utils.Adapter {
       this.pingInterval && clearInterval(this.pingInterval);
       this.pingInterval = setInterval(() => {
         this.log.debug("ping");
-         this.client.write(`\x00\x05\x00\x00`);
+        this.client.write(`\x00\x05\x00\x00`);
       }, 25000);
     });
     this.client.on("data", (data) => {
@@ -238,14 +247,14 @@ class Botslab360 extends utils.Adapter {
       if (dataString.includes("ack:") || this.buffer) {
         try {
           if (dataString.includes("}")) {
-           dataString= this.buffer+dataString;
-            this.buffer="";
+            dataString = this.buffer + dataString;
+            this.buffer = "";
           } else {
             this.buffer += dataString;
             return;
           }
-          const ack = Buffer.from(dataString.substring(0,dataString.indexOf("\x00",5)))
-          ack[3]=4
+          const ack = Buffer.from(dataString.substring(0, dataString.indexOf("\x00", 5)));
+          ack[3] = 4;
           const payload = dataString.split('data":"')[1].split('",')[0];
 
           this.log.debug(ack);
@@ -272,7 +281,7 @@ class Botslab360 extends utils.Adapter {
     this.client.on("close", () => {
       this.log.debug("close");
       if (this.reconnecting) {
-        return
+        return;
       }
       this.reconnectTCP && clearTimeout(this.reconnectTCP);
       this.reconnectTCP = setTimeout(() => {
@@ -454,7 +463,15 @@ class Botslab360 extends utils.Adapter {
       }
     }
   }
-
+  randomString(length) {
+    let result = "";
+    const characters = "abcdef0123456789";
+    const charactersLength = characters.length;
+    for (let i = 0; i < length; i++) {
+      result += characters.charAt(Math.floor(Math.random() * charactersLength));
+    }
+    return result;
+  }
   async refreshToken() {
     this.log.debug("Refresh token");
     await this.login();
@@ -505,8 +522,8 @@ class Botslab360 extends utils.Adapter {
           data = '{"mode":"smartClean","globalCleanTimes":1}';
         }
         if (type === "30000") {
-          data = '{"cmds":[{"data":{},"infoType":"20001"},{"data":{},"infoType":"21014"},{"data":{"mask":0,"startPos":0,"userId":0},"infoType":"21011"}],"mainCmds":[]}';
-        
+          data =
+            '{"cmds":[{"data":{},"infoType":"20001"},{"data":{},"infoType":"21014"},{"data":{"mask":0,"startPos":0,"userId":0},"infoType":"21011"}],"mainCmds":[]}';
         }
         await this.requestClient({
           method: "post",
@@ -556,7 +573,6 @@ class Botslab360 extends utils.Adapter {
             this.log.error(error);
             error.response && this.log.error(JSON.stringify(error.response.data));
           });
-    
       } else {
         const resultDict = {
           auto_target_humidity: "setTargetHumidity",
