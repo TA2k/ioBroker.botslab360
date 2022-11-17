@@ -13,6 +13,7 @@ const qs = require("qs");
 const Json2iob = require("./lib/json2iob");
 const JsCrypto = require("jscrypto");
 const { v4: uuidv4 } = require("uuid");
+const net = require("net");
 
 class Botslab360 extends utils.Adapter {
   /**
@@ -118,15 +119,11 @@ class Botslab360 extends utils.Adapter {
       sdpi: "3.0",
     };
 
-    const encryptedLoginQuery = JsCrypto.DES.encrypt(
-      JsCrypto.Utf8.parse(qs.stringify(loginQuery)),
-      JsCrypto.Base64.parse(this.key),
-      {
-        iv: JsCrypto.Base64.parse(this.key),
-        mode: JsCrypto.mode.CBC,
-        padding: JsCrypto.pad.Pkcs7,
-      },
-    );
+    const encryptedLoginQuery = JsCrypto.DES.encrypt(JsCrypto.Utf8.parse(qs.stringify(loginQuery)), JsCrypto.Base64.parse(this.key), {
+      iv: JsCrypto.Base64.parse(this.key),
+      mode: JsCrypto.mode.CBC,
+      padding: JsCrypto.pad.Pkcs7,
+    });
 
     await this.requestClient({
       method: "post",
@@ -154,7 +151,7 @@ class Botslab360 extends utils.Adapter {
           const decrypteds = JsCrypto.DES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(res.data.ret) }),
             JsCrypto.Base64.parse(this.key),
-            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
+            { iv: JsCrypto.Base64.parse(this.key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
           );
           this.log.debug(decrypteds.toString(JsCrypto.Utf8));
           const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
@@ -172,7 +169,6 @@ class Botslab360 extends utils.Adapter {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
-
     await this.requestClient({
       method: "post",
       url: "https://q.smart.360.cn/common/user/login",
@@ -180,13 +176,7 @@ class Botslab360 extends utils.Adapter {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "*/*",
         Connection: "keep-alive",
-        Cookie:
-          "q=" +
-          decodeURIComponent(this.session.q) +
-          ";t=" +
-          decodeURIComponent(this.session.t) +
-          ";qid=" +
-          this.session.qid,
+        Cookie: "q=" + decodeURIComponent(this.session.q) + ";t=" + decodeURIComponent(this.session.t) + ";qid=" + this.session.qid,
         "User-Agent": "qhsa-iphone-11.1.0",
         "Accept-Language": "de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8",
       },
@@ -198,7 +188,7 @@ class Botslab360 extends utils.Adapter {
         taskid: uuidv4(),
       }),
     })
-      .then((res) => {
+      .then(async (res) => {
         this.log.debug(JSON.stringify(res.data));
         if (res.data && res.data.errno !== 0) {
           this.log.error("Login failed: " + res.data.errmsg);
@@ -206,6 +196,8 @@ class Botslab360 extends utils.Adapter {
         }
         this.log.info(`Login successful: ${this.session.username}`);
         this.session.sid = res.data.data.sid;
+        this.session.pushKey = res.data.data.pushKey;
+        await this.connectTcp();
         this.setState("info.connection", true, true);
       })
       .catch(async (error) => {
@@ -213,7 +205,71 @@ class Botslab360 extends utils.Adapter {
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
   }
+  async connectTcp() {
+    this.log.debug("connectTcp");
+    //https://47.254.151.104:443
+    if (this.client) {
+      this.client.destroy();
+      this.client.connect(443, "47.254.151.104");
+      return;
+    } else {
+      this.client = new net.Socket();
+      this.client.connect(443, "47.254.151.104");
+    }
+    this.client.on("connect", () => {
+      this.log.debug("connect");
+      this.client.write(`\x00\x05\x00\x02\x00Ecv:1.7\n`);
+      this.client.write(`t:30\n`);
+      this.client.write(`u:${this.session.sid}@60009\n`);
+      this.client.write(`ts:${Date.now()}`);
+      // this.client.write(`\x00\x05\x00\x00\n`);
+      this.pingInterval && clearInterval(this.pingInterval);
+      this.pingInterval = setInterval(() => {
+        this.log.debug("ping");
+        // this.client.write(`\x00\x05\x00\x00`);
+      }, 60000);
+    });
+    this.client.on("data", (data) => {
+      this.log.debug("data");
+      const dataString = data.toString();
+      this.log.debug(dataString);
+      if (dataString.includes("ack:")) {
+        try {
+          const ack = dataString.split("ack:")[1].split("\x00")[0];
+          const payload = dataString.split('data":"')[1].split('",')[0];
 
+          this.log.debug(ack);
+          // this.client.write(`\x00\x05\x00\x04\x00\x09ack:${ack}`);
+          // this.client.write(`\x00\x05\x00\x04\x00	ack:${ack}`);
+          // this.client.write(`\x00\x05\x00\x00`);
+          const key = Buffer.from(this.session.pushKey.substring(0, 16)).toString("base64");
+          const decrypteds = JsCrypto.AES.decrypt(
+            new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(payload) }),
+            JsCrypto.Base64.parse(key),
+            { iv: JsCrypto.Base64.parse(key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 }
+          );
+          this.log.debug(decrypteds.toString(JsCrypto.Utf8));
+          const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
+          const body = JSON.parse(decryptRes.data);
+          this.json2iob.parse(decryptRes.sn + ".status", body.data, { forceIndex: true, channelName: "Status of the device" });
+        } catch (error) {
+          this.log.error(error);
+          this.log.error(error.stack);
+        }
+      }
+    });
+    this.client.on("close", () => {
+      this.log.debug("close");
+      setTimeout(() => {
+        this.log.debug("reconnect");
+        this.connectTcp();
+      }, 10000);
+    });
+    this.client.on("error", (error) => {
+      this.log.debug("error");
+      this.log.error(error);
+    });
+  }
   async getDeviceList() {
     await this.requestClient({
       method: "post",
@@ -282,7 +338,8 @@ class Botslab360 extends utils.Adapter {
               { command: "quiet-21022", name: "Quiet Mode" },
               { command: "strong-21022", name: "Strong Mode" },
               { command: "21015", name: "getConsumableInfo" },
-              { command: "20001", name: "Unknown" },
+              { command: "20001", name: "getStatus" },
+              { command: "20002", name: "getMap" },
               { command: "20034", name: "Unknown" },
             ];
             remoteArray.forEach((remote) => {
@@ -346,7 +403,7 @@ class Botslab360 extends utils.Adapter {
             data: "",
             devType: "3",
             from: "mpc_ios",
-            infoType: "21015",
+            infoType: 20001,
             lang: "de_DE",
             sn: device,
             taskid: uuidv4(),
@@ -361,28 +418,6 @@ class Botslab360 extends utils.Adapter {
               this.log.error("Update failed: " + res.data.errmsg);
               return;
             }
-            const data = res.data.data;
-            const forceIndex = true;
-            const preferedArrayName = null;
-
-            this.json2iob.parse(device + "." + element.path, data, {
-              forceIndex: forceIndex,
-              write: true,
-              preferedArrayName: preferedArrayName,
-              channelName: element.desc,
-            });
-            // await this.setObjectNotExistsAsync(element.path + ".json", {
-            //   type: "state",
-            //   common: {
-            //     name: "Raw JSON",
-            //     write: false,
-            //     read: true,
-            //     type: "string",
-            //     role: "json",
-            //   },
-            //   native: {},
-            // });
-            // this.setState(element.path + ".json", JSON.stringify(data), true);
           })
           .catch((error) => {
             if (error.response) {
