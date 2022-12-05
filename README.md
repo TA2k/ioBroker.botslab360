@@ -29,7 +29,7 @@ Status Abruf für verbrauchsgüter und karte muss manuell getriggert werden
 
 ## Changelog
 
-### 0.0.1
+### 0.0.2
 
 - (TA2k) initial release
 
