@@ -48,11 +48,11 @@ class Botslab360 extends utils.Adapter {
       this.log.info('Set interval to minimum 0.5');
       this.config.interval = 0.5;
     }
-    // if (!this.config.captcha) {
-    //   await this.getCaptcha()
-    //   this.log.error('Please read the captcha in ioBroker Log->Log Download and set captcha in the instance settings')
-    //   return
-    // }
+    if (!this.config.captcha) {
+      await this.getCaptcha();
+      this.log.error('Please read the captcha in ioBroker Log->Log Download and set captcha in the instance settings');
+      return;
+    }
 
     if (!this.config.username || !this.config.password) {
       this.log.error('Please set username and password in the instance settings');
@@ -70,13 +70,19 @@ class Botslab360 extends utils.Adapter {
     if (this.session.username) {
       await this.getDeviceList();
       await this.updateDevices();
-      this.updateInterval = setInterval(async () => {
-        await this.updateDevices();
-      }, this.config.interval * 60 * 1000);
+      this.updateInterval = setInterval(
+        async () => {
+          await this.updateDevices();
+        },
+        this.config.interval * 60 * 1000,
+      );
     }
-    this.refreshTokenInterval = setInterval(() => {
-      this.refreshToken();
-    }, 12 * 60 * 60 * 1000);
+    this.refreshTokenInterval = setInterval(
+      () => {
+        this.refreshToken();
+      },
+      12 * 60 * 60 * 1000,
+    );
   }
   async login() {
     const timestamp = Date.now();
