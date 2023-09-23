@@ -37,7 +37,27 @@
         "zh-cn": "应用密码"
       }
     },
-
+    "captchab64": {
+      "type": "imageSendTo"
+    },
+    "captcha": {
+      "type": "text",
+      "label": {
+        "en": "Captcha (see under Log-> Download Log)",
+        "de": "Captcha (siehe unter Protkolle->  Log herunterladen)",
+        "ru": "Captcha (см. под Log>- Скачать Log)",
+        "pt": "Captcha (veja em Log>- Baixar Log)",
+        "nl": "Captcha (Zie onder Log) Download Log",
+        "fr": "Captcha",
+        "it": "Captcha (vedere sotto Log>- Scarica Log)",
+        "es": "Captcha (ver bajo Iniciar sesión- Descargar Log)",
+        "pl": "Captcha (patrz pod Log>- Download Log) (ang.)",
+        "uk": "Captcha (див. Лог>- Завантажити журнал)",
+        "zh-cn": "卡特查(见Tal>-Download后勤)"
+      },
+      "newLine": true,
+      "sm": 3
+    },
     "interval": {
       "type": "number",
       "newLine": true,

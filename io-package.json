@@ -80,6 +80,8 @@
   "native": {
     "username": "",
     "password": "",
+    "captchab64": "",
+    "captcha": "",
     "interval": 10
   },
   "objects": [],
