@@ -51,6 +51,7 @@
     "extIcon": "https://raw.githubusercontent.com/TA2k/ioBroker.botslab360/main/admin/botslab360.png",
     "readme": "https://github.com/TA2k/ioBroker.botslab360/blob/main/README.md",
     "loglevel": "info",
+    "tier": 2,
     "mode": "daemon",
     "type": "household",
     "compact": true,
