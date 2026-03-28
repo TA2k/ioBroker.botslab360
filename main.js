@@ -8,12 +8,12 @@
 // you need to create an adapter
 const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const qs = require('qs');
 const Json2iob = require('json2iob');
 const JsCrypto = require('jscrypto');
 const { v4: uuidv4 } = require('uuid');
-const net = require('net');
+const net = require('node:net');
 
 class Botslab360 extends utils.Adapter {
   /**
