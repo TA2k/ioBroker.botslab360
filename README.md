@@ -29,6 +29,9 @@ Status Abruf für verbrauchsgüter und karte muss manuell getriggert werden
 
 ## Changelog
 
+### **WORK IN PROGRESS**
+- (iobroker-bot) Adapter requires node.js >= 20 now.
+
 ### 0.0.2
 
 - (TA2k) initial release
