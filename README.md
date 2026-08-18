@@ -29,6 +29,9 @@ Status Abruf für verbrauchsgüter und karte muss manuell getriggert werden
 
 ## Changelog
 
+### **WORK IN PROGRESS**
+- (copilot) Adapter requires node.js >= 22 now
+
 ### 0.0.2
 
 - (TA2k) initial release
