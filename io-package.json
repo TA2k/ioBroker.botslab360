@@ -1,8 +1,20 @@
 {
   "common": {
     "name": "botslab360",
-    "version": "0.0.2",
+    "version": "0.1.0",
     "news": {
+      "0.1.0": {
+        "en": "Add login with an existing 360 web session",
+        "de": "Anmeldung mit einer bestehenden 360-Websession hinzugefügt",
+        "ru": "Добавлен вход с существующей веб-сессией 360",
+        "pt": "Adicionado login com uma sessão web 360 existente",
+        "nl": "Inloggen met een bestaande 360-websessie toegevoegd",
+        "fr": "Ajout de la connexion avec une session web 360 existante",
+        "it": "Aggiunto l'accesso con una sessione web 360 esistente",
+        "es": "Se añadió el inicio de sesión con una sesión web de 360 existente",
+        "pl": "Dodano logowanie przy użyciu istniejącej sesji internetowej 360",
+        "zh-cn": "新增使用现有 360 Web 会话登录"
+      },
       "0.0.2": {
         "en": "initial release",
         "de": "Erstveröffentlichung",
@@ -75,13 +87,11 @@
       }
     ]
   },
-  "encryptedNative": ["password"],
-  "protectedNative": ["password"],
+  "encryptedNative": ["cookieQ", "cookieT"],
+  "protectedNative": ["cookieQ", "cookieT"],
   "native": {
-    "username": "",
-    "password": "",
-    "captchab64": "",
-    "captcha": "",
+    "cookieQ": "",
+    "cookieT": "",
     "interval": 10
   },
   "objects": [],

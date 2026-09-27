@@ -1,6 +1,6 @@
 {
   "name": "iobroker.botslab360",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Adapter for Botslab 360 Vacuum",
   "author": {
     "name": "TA2k",
