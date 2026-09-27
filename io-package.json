@@ -87,9 +87,10 @@
       }
     ]
   },
-  "encryptedNative": ["cookieQ", "cookieT"],
-  "protectedNative": ["cookieQ", "cookieT"],
+  "encryptedNative": ["cookieString", "cookieQ", "cookieT"],
+  "protectedNative": ["cookieString", "cookieQ", "cookieT"],
   "native": {
+    "cookieString": "",
     "cookieQ": "",
     "cookieT": "",
     "interval": 10

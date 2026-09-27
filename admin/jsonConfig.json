@@ -2,27 +2,27 @@
   "type": "panel",
   "i18n": false,
   "items": {
-    "cookieQ": {
+    "_cookieGuide": {
+      "type": "staticText",
+      "format": "html",
+      "text": {
+        "en": "<p><b>How to get your 360 web session cookie:</b></p><ol><li>Open <a href=\"https://i.360.cn\" target=\"_blank\" rel=\"noopener noreferrer\">i.360.cn</a> and sign in.</li><li>Press <b>F12</b> to open the browser developer tools and select the <b>Network</b> tab.</li><li>Reload the page (F5) and click any request to a 360 domain in the list.</li><li>Under <b>Request Headers</b> find the <b>Cookie</b> entry and copy its complete value.</li><li>Paste it into the field below. The adapter extracts the required Q and T values automatically. (The console command <code>copy(document.cookie)</code> does <b>not</b> work here, because the T cookie is HttpOnly.)</li></ol>",
+        "de": "<p><b>So erhältst du deinen 360-Websession-Cookie:</b></p><ol><li>Öffne <a href=\"https://i.360.cn\" target=\"_blank\" rel=\"noopener noreferrer\">i.360.cn</a> und melde dich an.</li><li>Drücke <b>F12</b>, um die Entwicklertools des Browsers zu öffnen, und wechsle auf den Reiter <b>Netzwerk</b>.</li><li>Lade die Seite neu (F5) und klicke in der Liste eine beliebige Anfrage an eine 360-Domain an.</li><li>Suche unter <b>Anfrageheader</b> den Eintrag <b>Cookie</b> und kopiere den kompletten Wert.</li><li>Füge ihn unten ein. Der Adapter extrahiert die benötigten Werte Q und T automatisch. (Der Konsolenbefehl <code>copy(document.cookie)</code> funktioniert hier <b>nicht</b>, weil das T-Cookie HttpOnly ist.)</li></ol>"
+      }
+    },
+    "cookieString": {
       "type": "password",
+      "visible": true,
+      "newLine": true,
+      "sm": 12,
       "label": {
-        "en": "360 Web Session Cookie Q",
-        "de": "360-Websession Cookie Q"
+        "en": "360 web session cookie",
+        "de": "360-Websession-Cookie"
       },
       "help": {
-        "en": "Required. Log in to the 360 website and enter the Q and T cookie values from the authenticated web session.",
-        "de": "Erforderlich. Auf der 360-Webseite anmelden und die Cookie-Werte Q und T aus der authentifizierten Websession eintragen."
-      },
-      "newLine": true,
-      "sm": 6
-    },
-    "cookieT": {
-      "type": "password",
-      "label": {
-        "en": "360 Web Session Cookie T",
-        "de": "360-Websession Cookie T"
-      },
-      "newLine": true,
-      "sm": 6
+        "en": "Paste the complete Cookie request header value copied from the browser Network tab (see the guide above). It must contain the q and t values. copy(document.cookie) does not work because the t cookie is HttpOnly.",
+        "de": "Füge den kompletten Wert des Cookie-Anfrageheaders ein, den du im Netzwerk-Reiter des Browsers kopiert hast (siehe Anleitung oben). Er muss die Werte q und t enthalten. copy(document.cookie) funktioniert nicht, weil das t-Cookie HttpOnly ist."
+      }
     },
     "interval": {
       "type": "number",

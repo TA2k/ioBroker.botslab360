@@ -8,12 +8,11 @@
 // you need to create an adapter
 const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
-const qs = require('qs');
 const Json2iob = require('json2iob');
 const JsCrypto = require('jscrypto');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const net = require('net');
-const { decodeCookieValue, deriveQidFromCookieQ } = require('./lib/auth');
+const { decodeCookieValue, deriveQidFromCookieQ, parseWebSessionCookie } = require('./lib/auth');
 
 class Botslab360 extends utils.Adapter {
   /**
@@ -90,23 +89,49 @@ class Botslab360 extends utils.Adapter {
   }
 
   async authenticate() {
-    const cookieQ = String(this.config.cookieQ || '').trim();
-    const cookieT = String(this.config.cookieT || '').trim();
+    const cookieString = String(this.config.cookieString || '').trim();
+    let cookieQ;
+    let cookieT;
+    let cookieQid;
 
-    if (!cookieQ || !cookieT) {
-      this.log.error('Please set both cookie Q and cookie T in the instance settings');
-      return false;
+    if (cookieString) {
+      // A full cookie string was pasted: it must carry both q and t. Never mix a fresh
+      // value from the string with a stale value from the legacy single fields.
+      const parsed = parseWebSessionCookie(cookieString);
+      cookieQ = parsed.q;
+      cookieT = parsed.t;
+      cookieQid = parsed.qid;
+
+      if (!cookieQ || !cookieT) {
+        this.log.error('The pasted 360 web session cookie must contain both the q and t values');
+        return false;
+      }
+    } else {
+      // Legacy fallback: separate q/t fields.
+      cookieQ = String(this.config.cookieQ || '').trim();
+      cookieT = String(this.config.cookieT || '').trim();
+
+      if (!cookieQ || !cookieT) {
+        this.log.error('Please paste the full 360 web session cookie (containing q and t) in the instance settings');
+        return false;
+      }
     }
 
     this.log.info('Login to 360 using an existing web session');
-    return this.loginWithWebSession(cookieQ, cookieT);
+    return this.loginWithWebSession(cookieQ, cookieT, cookieQid);
   }
 
-  async loginWithWebSession(cookieQ, cookieT) {
-    const qid = deriveQidFromCookieQ(cookieQ);
+  /**
+   * @param {string} cookieQ
+   * @param {string} cookieT
+   * @param {string} [explicitQid]
+   */
+  async loginWithWebSession(cookieQ, cookieT, explicitQid) {
+    const qidFromCookie = String(explicitQid || '').trim();
+    const qid = /^\d+$/.test(qidFromCookie) ? qidFromCookie : deriveQidFromCookieQ(cookieQ);
 
     if (!qid) {
-      this.log.error('Could not determine a valid QID from cookie Q');
+      this.log.error('Could not determine a valid QID from the cookie');
       return false;
     }
 
@@ -140,13 +165,13 @@ class Botslab360 extends utils.Adapter {
           'User-Agent': 'qhsa-iphone-11.1.0',
           'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
         },
-        data: qs.stringify({
+        data: new URLSearchParams({
           clientInfo:
             '{"release":"appstore","brand":"iPhone","model":"iPhone10,5","notifyId":"aa0ad645269de676a5ee6a728ba13b777ed3d4aa4d0e08a578097fbe78768b02","lang":"de_DE","imei":"f3bc82b802bd91a51d0dcc6499efeba3"}',
           lang: 'de_DE',
           phoneNum: '',
-          taskid: uuidv4(),
-        }),
+          taskid: crypto.randomUUID(),
+        }).toString(),
       });
     } catch (error) {
       const failure = this.getRequestFailure(error);
@@ -291,13 +316,13 @@ class Botslab360 extends utils.Adapter {
         'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
         'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
       },
-      data: qs.stringify({
+      data: new URLSearchParams({
         countryId: 'DE',
         devType: '3',
         from: 'mpc_ios',
         lang: 'de_DE',
-        taskid: uuidv4(),
-      }),
+        taskid: crypto.randomUUID(),
+      }).toString(),
     })
       .then(async (res) => {
         if (res.data && res.data.errno !== 0) {
@@ -394,16 +419,16 @@ class Botslab360 extends utils.Adapter {
             'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
             'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
           },
-          data: qs.stringify({
+          data: new URLSearchParams({
             countryId: 'DE',
             data: '',
             devType: '3',
             from: 'mpc_ios',
-            infoType: 20001,
+            infoType: '20001',
             lang: 'de_DE',
             sn: device,
-            taskid: uuidv4(),
-          }),
+            taskid: crypto.randomUUID(),
+          }).toString(),
         })
           .then(async (res) => {
             this.log.debug(JSON.stringify(res.data));
@@ -452,7 +477,7 @@ class Botslab360 extends utils.Adapter {
       this.updateInterval && clearInterval(this.updateInterval);
       this.refreshTokenInterval && clearInterval(this.refreshTokenInterval);
       callback();
-    } catch (e) {
+    } catch {
       callback();
     }
   }
@@ -503,7 +528,7 @@ class Botslab360 extends utils.Adapter {
             'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
             'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
           },
-          data: qs.stringify({
+          data: new URLSearchParams({
             countryId: 'DE',
             data: data,
             devType: '3',
@@ -511,8 +536,8 @@ class Botslab360 extends utils.Adapter {
             infoType: type,
             lang: 'de_DE',
             sn: deviceId,
-            taskid: uuidv4(),
-          }),
+            taskid: crypto.randomUUID(),
+          }).toString(),
         })
           .then((res) => {
             if (res.data && res.data.errno === 102) {
