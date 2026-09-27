@@ -81,6 +81,14 @@ class Botslab360 extends utils.Adapter {
     return 'request failed';
   }
 
+  getSessionCookie() {
+    const session = this.session;
+    if (!session || !session.q || !session.t || !session.qid || !session.sid) {
+      return null;
+    }
+    return 'q=' + session.q + ';t=' + session.t + ';qid=' + session.qid + ';sid=' + session.sid;
+  }
+
   async authenticate() {
     const cookieQ = String(this.config.cookieQ || '').trim();
     const cookieT = String(this.config.cookieT || '').trim();
@@ -179,26 +187,32 @@ class Botslab360 extends utils.Adapter {
       this.client.destroy();
       this.client.connect(443, '47.254.151.104');
       return;
-    } else {
-      this.client = new net.Socket();
-      this.client.connect(443, '47.254.151.104');
     }
-    this.client.on('connect', () => {
+    const client = new net.Socket();
+    this.client = client;
+    client.connect(443, '47.254.151.104');
+    client.on('connect', () => {
       this.log.debug('connect');
+      const sid = this.session && this.session.sid;
+      if (!sid) {
+        this.log.error('Cannot connect to device updates because session data is missing');
+        client.destroy();
+        return;
+      }
       this.reconnecting = false;
       clearTimeout(this.reconnectTCP);
-      this.client.write(`\x00\x05\x00\x02\x00Ecv:1.7\n`);
-      this.client.write(`t:30\n`);
-      this.client.write(`u:${this.session.sid}@60009\n`);
-      this.client.write(`ts:${Date.now()}`);
+      client.write(`\x00\x05\x00\x02\x00Ecv:1.7\n`);
+      client.write(`t:30\n`);
+      client.write(`u:${sid}@60009\n`);
+      client.write(`ts:${Date.now()}`);
       // this.client.write(`\x00\x05\x00\x00\n`);
       this.pingInterval && clearInterval(this.pingInterval);
       this.pingInterval = setInterval(() => {
         this.log.debug('ping');
-        this.client.write(`\x00\x05\x00\x00`);
+        client.write(`\x00\x05\x00\x00`);
       }, 25000);
     });
-    this.client.on('data', (data) => {
+    client.on('data', (data) => {
       this.log.debug('data');
       let dataString = data.toString();
       this.log.debug(dataString);
@@ -215,12 +229,16 @@ class Botslab360 extends utils.Adapter {
           ack[3] = 4;
           const payload = dataString.split('data":"')[1].split('",')[0];
 
-          this.log.debug(ack);
-          this.client.write(ack);
+          client.write(ack.toString('latin1'), 'latin1');
           // this.client.write(`\x00\x05\x00\x04\x00\x09ack:${ack}`);
           // this.client.write(`\x00\x05\x00\x04\x00	ack:${ack}`);
           // this.client.write(`\x00\x05\x00\x00`);
-          const key = Buffer.from(this.session.pushKey.substring(0, 16)).toString('base64');
+          const pushKey = this.session && this.session.pushKey;
+          if (!pushKey) {
+            this.log.error('Cannot decrypt device update because session data is missing');
+            return;
+          }
+          const key = Buffer.from(pushKey.substring(0, 16)).toString('base64');
           const decrypteds = JsCrypto.AES.decrypt(
             new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(payload) }),
             JsCrypto.Base64.parse(key),
@@ -234,12 +252,12 @@ class Botslab360 extends utils.Adapter {
             channelName: 'Status of the device',
           });
         } catch (error) {
-          this.log.error(error);
-          this.log.error(error.stack);
+          const message = error instanceof Error ? error.message : String(error);
+          this.log.error(`Could not process device update: ${message}`);
         }
       }
     });
-    this.client.on('close', () => {
+    client.on('close', () => {
       this.log.debug('close');
       if (this.reconnecting) {
         return;
@@ -251,12 +269,17 @@ class Botslab360 extends utils.Adapter {
         this.reconnecting = true;
       }, 10000);
     });
-    this.client.on('error', (error) => {
+    client.on('error', (error) => {
       this.log.debug('error');
-      this.log.error(error);
+      this.log.error(error.message);
     });
   }
   async getDeviceList() {
+    const sessionCookie = this.getSessionCookie();
+    if (!sessionCookie) {
+      this.log.error('Cannot request device list because session data is missing');
+      return;
+    }
     await this.requestClient({
       method: 'post',
       url: 'https://q.smart.360.cn/common/dev/GetList',
@@ -264,8 +287,7 @@ class Botslab360 extends utils.Adapter {
         'Content-Type': 'application/x-www-form-urlencoded',
         Accept: '*/*',
         Connection: 'keep-alive',
-        Cookie:
-          'q=' + this.session.q + ';t=' + this.session.t + ';qid=' + this.session.qid + ';sid=' + this.session.sid,
+        Cookie: sessionCookie,
         'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
         'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
       },
@@ -344,6 +366,11 @@ class Botslab360 extends utils.Adapter {
   }
 
   async updateDevices() {
+    const sessionCookie = this.getSessionCookie();
+    if (!sessionCookie) {
+      this.log.error('Cannot update devices because session data is missing');
+      return;
+    }
     const statusArray = [
       {
         url: 'https://q.smart.360.cn/clean/cmd/',
@@ -363,8 +390,7 @@ class Botslab360 extends utils.Adapter {
             'Content-Type': 'application/x-www-form-urlencoded',
             Accept: '*/*',
             Connection: 'keep-alive',
-            Cookie:
-              'q=' + this.session.q + ';t=' + this.session.t + ';qid=' + this.session.qid + ';sid=' + this.session.sid,
+            Cookie: sessionCookie,
             'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
             'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
           },
@@ -421,7 +447,6 @@ class Botslab360 extends utils.Adapter {
   onUnload(callback) {
     try {
       this.setState('info.connection', false, true);
-      this.refreshTimeout && clearTimeout(this.refreshTimeout);
       this.reLoginTimeout && clearTimeout(this.reLoginTimeout);
       this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
@@ -440,6 +465,11 @@ class Botslab360 extends utils.Adapter {
   async onStateChange(id, state) {
     if (state) {
       if (!state.ack) {
+        const sessionCookie = this.getSessionCookie();
+        if (!sessionCookie) {
+          this.log.error('Cannot send command because session data is missing');
+          return;
+        }
         const deviceId = id.split('.')[2];
         let command = id.split('.')[4];
         let type = command.split('-')[1];
@@ -469,8 +499,7 @@ class Botslab360 extends utils.Adapter {
             'Content-Type': 'application/x-www-form-urlencoded',
             Accept: '*/*',
             Connection: 'keep-alive',
-            Cookie:
-              'q=' + this.session.q + ';t=' + this.session.t + ';qid=' + this.session.qid + ';sid=' + this.session.sid,
+            Cookie: sessionCookie,
             'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
             'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
           },
