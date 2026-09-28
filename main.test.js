@@ -99,6 +99,13 @@ describe('China device API', () => {
     expect(res.errno).to.equal(china.ERRNO_SESSION_EXPIRED);
   });
 
+  it('treats errno 102 and 103 as an expired session', () => {
+    expect(china.isSessionExpired(102)).to.equal(true);
+    expect(china.isSessionExpired(103)).to.equal(true);
+    expect(china.isSessionExpired(0)).to.equal(false);
+    expect(china.isSessionExpired(5010)).to.equal(false);
+  });
+
   it('decodes a push frame into the device sn and status', () => {
     const pushKey = '0123456789abcdefEXTRA';
     const keyIv = Buffer.from(pushKey, 'utf8').subarray(0, 16);

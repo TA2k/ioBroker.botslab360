@@ -428,7 +428,7 @@ class Botslab360 extends utils.Adapter {
       this.log.error(`Device list request failed (${this.getRequestFailure(error)})`);
       return;
     }
-    if (res.errno === china.ERRNO_SESSION_EXPIRED) {
+    if (china.isSessionExpired(res.errno)) {
       if (!retried) {
         await this.handleAuthFailure(() => this.getDeviceListChina(true));
       } else {
@@ -483,7 +483,7 @@ class Botslab360 extends utils.Adapter {
         this.log.error(`Update request failed (${this.getRequestFailure(error)})`);
         continue;
       }
-      if (res.errno === china.ERRNO_SESSION_EXPIRED) {
+      if (china.isSessionExpired(res.errno)) {
         if (!retried) {
           await this.handleAuthFailure(() => this.updateDevicesChina(true));
         } else {
@@ -507,7 +507,7 @@ class Botslab360 extends utils.Adapter {
       this.log.error(`${commandKey} for ${deviceId} failed (${this.getRequestFailure(error)})`);
       return;
     }
-    if (res.errno === china.ERRNO_SESSION_EXPIRED) {
+    if (china.isSessionExpired(res.errno)) {
       if (!retried) {
         await this.handleAuthFailure(() => this.sendCommandChina(deviceId, commandKey, true));
       } else {
