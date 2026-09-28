@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "botslab360",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "news": {
+      "0.2.1": {
+        "en": "Auto-retry other regions when the account is not found; verbose debug logging; log the captcha image inline",
+        "de": "Automatischer Wechsel auf andere Regionen, wenn der Account nicht gefunden wird; ausführliche Debug-Logs; Captcha-Bild zusätzlich im Log"
+      },
       "0.2.0": {
         "en": "Switch to headless email/password login on the /v1 API; cookie login is no longer required",
         "de": "Umstellung auf Headless-Login mit E-Mail/Passwort über die /v1-API; Cookie-Login wird nicht mehr benötigt",

@@ -53,6 +53,8 @@ class Botslab360 extends utils.Adapter {
     this.subscribeStates('*');
     await this.ensureInfoObjects();
     this.device = await this.loadDeviceIdentity();
+    this.log.debug(`Configured region=${this.config.region}, interval=${this.config.interval} min`);
+    this.log.debug(`Device identity mid=${this.device.mid} androidid=${this.device.androidid} m2=${this.device.m2}`);
 
     if (!(await this.login())) {
       return;
@@ -134,25 +136,49 @@ class Botslab360 extends utils.Adapter {
       this.log.debug('Captcha pending; deferring login until the solved code is provided');
       return false;
     }
-    const region = this.config.region;
     const opts = {
-      region,
       email: String(this.config.email).trim(),
       password: String(this.config.password),
       device: this.device,
       needDeviceCheck: 0,
+      debug: (m) => this.log.debug(m),
     };
     if (this.pendingCaptcha && captchaCode) {
       opts.captcha = { sc: this.pendingCaptcha.sc, code: String(captchaCode).trim() };
     }
 
+    // On a captcha retry the region is already fixed (the sc token is region-bound).
+    // Otherwise try the configured region first and fall through the others on a
+    // "account does not exist" (1036), since the login host is region-scoped.
+    const regionsToTry =
+      this.pendingCaptcha && captchaCode ? [this.config.region] : [this.config.region, ...REGIONS.filter((r) => r !== this.config.region)];
+
     let result;
-    try {
-      result = await quc.login(this.requestClient, opts);
-    } catch (error) {
-      this.log.error(`360 login request failed (${this.getRequestFailure(error)})`);
-      return false;
+    let usedRegion = this.config.region;
+    for (let i = 0; i < regionsToTry.length; i++) {
+      const region = regionsToTry[i];
+      this.log.debug(`Login attempt region=${region} email=${opts.email} captchaCode=${captchaCode ? 'yes' : 'no'}`);
+      try {
+        result = await quc.login(this.requestClient, { ...opts, region });
+      } catch (error) {
+        this.log.error(`360 login request failed (${this.getRequestFailure(error)})`);
+        return false;
+      }
+      usedRegion = region;
+      if (result.errno === quc.ERRNO_ACCOUNT_NOT_FOUND && i < regionsToTry.length - 1) {
+        this.log.info(`Account not found on region ${region}, trying the next region`);
+        continue;
+      }
+      break;
     }
+
+    // Adopt the region that answered, so mintSid and every later /v1 call use the same
+    // host. This is a session switch; update the instance setting to make it permanent.
+    if (usedRegion !== this.config.region) {
+      this.log.info(`Account found on region ${usedRegion}; using it for this session. Set region=${usedRegion} in the instance settings to make it permanent.`);
+      this.config.region = usedRegion;
+    }
+    const region = this.config.region;
 
     if (result.captchaRequired) {
       await this.requestCaptcha(region);
@@ -167,7 +193,7 @@ class Botslab360 extends utils.Adapter {
     this.pendingCaptcha = null;
     let mint;
     try {
-      mint = await api.mintSid(this.requestClient, { region, session: { q: result.q, t: result.t }, m2: this.device.m2 });
+      mint = await api.mintSid(this.requestClient, { region, session: { q: result.q, t: result.t }, m2: this.device.m2, debug: (m) => this.log.debug(m) });
     } catch (error) {
       this.log.error(`Session mint request failed (${this.getRequestFailure(error)})`);
       return false;
@@ -186,13 +212,18 @@ class Botslab360 extends utils.Adapter {
 
   async requestCaptcha(region) {
     try {
-      const captcha = await quc.getCaptcha(this.requestClient, { region, device: this.device });
+      const captcha = await quc.getCaptcha(this.requestClient, { region, device: this.device, debug: (m) => this.log.debug(m) });
       this.pendingCaptcha = { sc: captcha.sc };
-      const dataUrl = 'data:image/jpeg;base64,' + captcha.image.toString('base64');
-      await this.setStateAsync('info.captchaImage', dataUrl, true);
+      const b64 = captcha.image.toString('base64');
+      await this.setStateAsync('info.captchaImage', 'data:image/jpeg;base64,' + b64, true);
+      this.log.debug(`Captcha fetched: image ${captcha.image.length} bytes, sc length ${captcha.sc ? captcha.sc.length : 0}`);
       this.log.warn(
         'A captcha is required to log in. Open the image stored in state info.captchaImage (paste the data URL into a browser) and write the solved code to state info.captchaRequest.',
       );
+      // Also emit the image inline in the log, so it can be read straight from the
+      // downloaded log file without opening the state.
+      this.log.info('Press on Log download/Protokolle -> Log herunterladen to see the captcha:');
+      this.log.warn("<html><img src='data:image/jpeg;base64," + b64 + "' /></html>");
     } catch (error) {
       this.log.error(`Could not fetch captcha (${this.getRequestFailure(error)})`);
     }
@@ -232,6 +263,7 @@ class Botslab360 extends utils.Adapter {
         path: '/v1/iot/device/list',
         session: this.session,
         m2: this.device.m2,
+        debug: (m) => this.log.debug(m),
       });
     } catch (error) {
       this.log.error(`Device list request failed (${this.getRequestFailure(error)})`);
@@ -250,6 +282,7 @@ class Botslab360 extends utils.Adapter {
       return;
     }
 
+    this.log.debug(`Device list raw response: ${JSON.stringify(res)}`);
     const devices = (res.data && res.data.devices) || [];
     this.log.info(`Found ${devices.length} devices`);
     for (const device of devices) {
@@ -318,6 +351,7 @@ class Botslab360 extends utils.Adapter {
           session: this.session,
           m2: this.device.m2,
           data: JSON.stringify({ device_id: id }),
+          debug: (m) => this.log.debug(m),
         });
       } catch (error) {
         this.log.error(`Update request failed (${this.getRequestFailure(error)})`);
@@ -335,6 +369,7 @@ class Botslab360 extends utils.Adapter {
         this.log.debug(`Update for ${id} returned code ${res && res.code}`);
         continue;
       }
+      this.log.debug(`get_info raw response for ${id}: ${JSON.stringify(res)}`);
       this.json2iob.parse(id + '.status', res.data, { forceIndex: true, channelName: 'Status of the device' });
     }
   }
@@ -405,6 +440,7 @@ class Botslab360 extends utils.Adapter {
 
   async sendCommand(deviceId, command, path, data, retried) {
     let res;
+    this.log.debug(`${command} for ${deviceId} payload: ${JSON.stringify(data)}`);
     try {
       res = await api.request(this.requestClient, {
         region: this.config.region,
@@ -413,6 +449,7 @@ class Botslab360 extends utils.Adapter {
         session: this.session,
         m2: this.device.m2,
         data: JSON.stringify(data),
+        debug: (m) => this.log.debug(m),
       });
     } catch (error) {
       this.log.error(`${command} for ${deviceId} failed (${this.getRequestFailure(error)})`);
