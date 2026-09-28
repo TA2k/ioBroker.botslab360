@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "botslab360",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "news": {
+      "0.3.1": {
+        "en": "Fix the China (360Robot) session mint and recognize the expired-session error so login and device polling work",
+        "de": "China-Login (360Robot) korrigiert (Session-Mint) und abgelaufene Sitzung erkannt, damit Anmeldung und Geräteabfrage funktionieren"
+      },
       "0.3.0": {
         "en": "Add a China (360Robot / q.smart.360.cn) backend selectable via the new Server option, for accounts that cannot log in on the international servers",
         "de": "China-Backend (360Robot / q.smart.360.cn) über die neue Server-Option hinzugefügt, für Konten, die sich nicht an den internationalen Servern anmelden können"

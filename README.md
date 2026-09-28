@@ -42,6 +42,10 @@ Status Abruf für Verbrauchsgüter und Karte muss manuell getriggert werden. Bei
 
 ## Changelog
 
+### 0.3.1
+
+- (TA2k) Fix the China (360Robot) session mint (errno 100) and recognize the expired-session error so login and device polling work
+
 ### 0.3.0
 
 - (TA2k) Add a China (360Robot / q.smart.360.cn) backend selectable via the new Server option, for accounts that cannot log in on the international servers
