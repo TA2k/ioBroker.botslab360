@@ -2,26 +2,43 @@
   "type": "panel",
   "i18n": false,
   "items": {
-    "_cookieGuide": {
-      "type": "staticText",
-      "format": "html",
-      "text": {
-        "en": "<p><b>How to get your 360 web session cookie:</b></p><ol><li>Open <a href=\"https://i.360.cn\" target=\"_blank\" rel=\"noopener noreferrer\">i.360.cn</a> and sign in.</li><li>Press <b>F12</b> to open the browser developer tools and select the <b>Network</b> tab.</li><li>Reload the page (F5) and click any request to a 360 domain in the list.</li><li>Under <b>Request Headers</b> find the <b>Cookie</b> entry and copy its complete value.</li><li>Paste it into the field below. The adapter extracts the required Q and T values automatically. (The console command <code>copy(document.cookie)</code> does <b>not</b> work here, because the T cookie is HttpOnly.)</li></ol>",
-        "de": "<p><b>So erhältst du deinen 360-Websession-Cookie:</b></p><ol><li>Öffne <a href=\"https://i.360.cn\" target=\"_blank\" rel=\"noopener noreferrer\">i.360.cn</a> und melde dich an.</li><li>Drücke <b>F12</b>, um die Entwicklertools des Browsers zu öffnen, und wechsle auf den Reiter <b>Netzwerk</b>.</li><li>Lade die Seite neu (F5) und klicke in der Liste eine beliebige Anfrage an eine 360-Domain an.</li><li>Suche unter <b>Anfrageheader</b> den Eintrag <b>Cookie</b> und kopiere den kompletten Wert.</li><li>Füge ihn unten ein. Der Adapter extrahiert die benötigten Werte Q und T automatisch. (Der Konsolenbefehl <code>copy(document.cookie)</code> funktioniert hier <b>nicht</b>, weil das T-Cookie HttpOnly ist.)</li></ol>"
-      }
-    },
-    "cookieString": {
-      "type": "password",
-      "visible": true,
+    "email": {
+      "type": "text",
       "newLine": true,
       "sm": 12,
+      "md": 6,
       "label": {
-        "en": "360 web session cookie",
-        "de": "360-Websession-Cookie"
+        "en": "360 / Botslab account email",
+        "de": "360-/Botslab-Konto-E-Mail"
+      }
+    },
+    "password": {
+      "type": "password",
+      "visible": true,
+      "sm": 12,
+      "md": 6,
+      "label": {
+        "en": "Password",
+        "de": "Passwort"
+      }
+    },
+    "region": {
+      "type": "select",
+      "newLine": true,
+      "sm": 12,
+      "md": 4,
+      "label": {
+        "en": "Account region",
+        "de": "Konto-Region"
       },
+      "options": [
+        { "value": "eu1", "label": "Europe (eu1)" },
+        { "value": "na1", "label": "North America (na1)" },
+        { "value": "ap1", "label": "Asia Pacific (ap1)" }
+      ],
       "help": {
-        "en": "Paste the complete Cookie request header value copied from the browser Network tab (see the guide above). It must contain the q and t values. copy(document.cookie) does not work because the t cookie is HttpOnly.",
-        "de": "Füge den kompletten Wert des Cookie-Anfrageheaders ein, den du im Netzwerk-Reiter des Browsers kopiert hast (siehe Anleitung oben). Er muss die Werte q und t enthalten. copy(document.cookie) funktioniert nicht, weil das t-Cookie HttpOnly ist."
+        "en": "Choose the region the account was registered in. A wrong region rejects the login.",
+        "de": "Wähle die Region, in der das Konto registriert wurde. Eine falsche Region verhindert die Anmeldung."
       }
     },
     "interval": {
@@ -40,6 +57,15 @@
         "es": "Intervalo de actualización (en minutos)",
         "pl": "Interwał aktualizacji (w minutach)",
         "zh-cn": "更新间隔（分钟）"
+      }
+    },
+    "_captchaGuide": {
+      "type": "staticText",
+      "newLine": true,
+      "format": "html",
+      "text": {
+        "en": "<p>If the login needs a captcha, the adapter stores the image as a data URL in state <code>info.captchaImage</code> and logs a warning. Open that data URL in a browser, then write the solved code to state <code>info.captchaRequest</code> to continue.</p>",
+        "de": "<p>Falls für die Anmeldung ein Captcha nötig ist, legt der Adapter das Bild als Data-URL im State <code>info.captchaImage</code> ab und schreibt eine Warnung ins Log. Öffne diese Data-URL im Browser und schreibe den gelösten Code in den State <code>info.captchaRequest</code>, um fortzufahren.</p>"
       }
     }
   }

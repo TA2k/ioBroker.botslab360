@@ -4,15 +4,15 @@
  * Created with @iobroker/create-adapter v2.3.0
  */
 
-// The adapter-core module gives you access to the core ioBroker functions
-// you need to create an adapter
 const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
 const Json2iob = require('json2iob');
-const JsCrypto = require('jscrypto');
-const crypto = require('crypto');
-const net = require('net');
-const { decodeCookieValue, deriveQidFromCookieQ, parseWebSessionCookie } = require('./lib/auth');
+const quc = require('./lib/quc');
+const api = require('./lib/api');
+
+const REGIONS = ['na1', 'eu1', 'ap1'];
+// v1 codes that mean the session is no longer accepted and a fresh login is required.
+const AUTH_FAILURE_CODES = [100003];
 
 class Botslab360 extends utils.Adapter {
   /**
@@ -27,33 +27,46 @@ class Botslab360 extends utils.Adapter {
     this.on('stateChange', this.onStateChange.bind(this));
     this.on('unload', this.onUnload.bind(this));
     this.deviceArray = [];
-    this.buffer = '';
+    this.session = {};
+    this.device = null;
+    this.pendingCaptcha = null;
+    this.started = false;
     this.json2iob = new Json2iob(this);
     this.requestClient = axios.create();
   }
 
-  /**
-   * Is called when databases are connected and adapter received configuration.
-   */
   async onReady() {
-    // Reset the connection indicator during startup
     this.setState('info.connection', false, true);
 
     if (this.config.interval < 0.5) {
       this.log.info('Set interval to minimum 0.5');
       this.config.interval = 0.5;
     }
-
-    this.updateInterval = null;
-    this.reLoginTimeout = null;
-    this.refreshTokenTimeout = null;
-    this.session = {};
-    this.subscribeStates('*');
-
-    if (!(await this.authenticate())) {
+    if (!REGIONS.includes(this.config.region)) {
+      this.config.region = 'eu1';
+    }
+    if (!this.config.email || !this.config.password) {
+      this.log.error('Please enter your 360/Botslab account email and password in the instance settings');
       return;
     }
 
+    this.subscribeStates('*');
+    await this.ensureInfoObjects();
+    this.device = await this.loadDeviceIdentity();
+
+    if (!(await this.login())) {
+      return;
+    }
+  }
+
+  // Discovery, polling and session refresh. Runs once after the first successful login
+  // (initial or after a solved captcha), so recovering from a captcha resumes the adapter
+  // while the periodic re-login does not restart discovery.
+  async startOnce() {
+    if (this.started) {
+      return;
+    }
+    this.started = true;
     await this.getDeviceList();
     await this.updateDevices();
     this.updateInterval = setInterval(
@@ -62,12 +75,127 @@ class Botslab360 extends utils.Adapter {
       },
       this.config.interval * 60 * 1000,
     );
+    // Refresh the session periodically; the sid is cheap to re-mint with the stable device.
     this.refreshTokenInterval = setInterval(
       () => {
-        this.refreshToken();
+        this.login();
       },
       12 * 60 * 60 * 1000,
     );
+  }
+
+  async ensureInfoObjects() {
+    await this.setObjectNotExistsAsync('info.deviceId', {
+      type: 'state',
+      common: { name: 'Persisted device fingerprint', type: 'string', role: 'text', read: true, write: false },
+      native: {},
+    });
+    await this.setObjectNotExistsAsync('info.captchaImage', {
+      type: 'state',
+      common: { name: 'Captcha image (data URL) to solve', type: 'string', role: 'text', read: true, write: false },
+      native: {},
+    });
+    await this.setObjectNotExistsAsync('info.captchaRequest', {
+      type: 'state',
+      common: { name: 'Write the solved captcha code here to continue login', type: 'string', role: 'text', read: true, write: true },
+      native: {},
+    });
+  }
+
+  // A stable device fingerprint avoids the risk engine treating every login as a new
+  // device (which forces a captcha). It is generated once and kept across restarts.
+  async loadDeviceIdentity() {
+    const state = await this.getStateAsync('info.deviceId');
+    if (state && typeof state.val === 'string' && state.val) {
+      try {
+        const parsed = JSON.parse(state.val);
+        if (parsed && parsed.mid && parsed.androidid && parsed.m2) {
+          return parsed;
+        }
+      } catch {
+        // fall through and regenerate
+      }
+    }
+    const device = quc.createDeviceIdentity();
+    await this.setStateAsync('info.deviceId', JSON.stringify(device), true);
+    return device;
+  }
+
+  /**
+   * Log in with email/password and mint a session id. When a captcha is required the
+   * image is exposed via info.captchaImage and the solved code is read back from
+   * info.captchaRequest.
+   * @param {string} [captchaCode]
+   */
+  async login(captchaCode) {
+    // A captcha is already waiting for the user; suppress automatic logins (periodic
+    // refresh, auth-failure retries) that would overwrite its image and sc token.
+    if (this.pendingCaptcha && !captchaCode) {
+      this.log.debug('Captcha pending; deferring login until the solved code is provided');
+      return false;
+    }
+    const region = this.config.region;
+    const opts = {
+      region,
+      email: String(this.config.email).trim(),
+      password: String(this.config.password),
+      device: this.device,
+      needDeviceCheck: 0,
+    };
+    if (this.pendingCaptcha && captchaCode) {
+      opts.captcha = { sc: this.pendingCaptcha.sc, code: String(captchaCode).trim() };
+    }
+
+    let result;
+    try {
+      result = await quc.login(this.requestClient, opts);
+    } catch (error) {
+      this.log.error(`360 login request failed (${this.getRequestFailure(error)})`);
+      return false;
+    }
+
+    if (result.captchaRequired) {
+      await this.requestCaptcha(region);
+      return false;
+    }
+    if (result.errno !== 0) {
+      this.log.error(`360 login failed (errno ${result.errno}${result.errmsg ? ': ' + result.errmsg : ''})`);
+      this.setState('info.connection', false, true);
+      return false;
+    }
+
+    this.pendingCaptcha = null;
+    let mint;
+    try {
+      mint = await api.mintSid(this.requestClient, { region, session: { q: result.q, t: result.t }, m2: this.device.m2 });
+    } catch (error) {
+      this.log.error(`Session mint request failed (${this.getRequestFailure(error)})`);
+      return false;
+    }
+    if (mint.code !== 0) {
+      this.log.error(`Session mint was rejected (code ${mint.code}${mint.msg ? ': ' + mint.msg : ''})`);
+      return false;
+    }
+
+    this.session = { q: result.q, t: result.t, qid: result.qid, sid: mint.sid };
+    this.setState('info.connection', true, true);
+    this.log.info('360 login successful');
+    await this.startOnce();
+    return true;
+  }
+
+  async requestCaptcha(region) {
+    try {
+      const captcha = await quc.getCaptcha(this.requestClient, { region, device: this.device });
+      this.pendingCaptcha = { sc: captcha.sc };
+      const dataUrl = 'data:image/jpeg;base64,' + captcha.image.toString('base64');
+      await this.setStateAsync('info.captchaImage', dataUrl, true);
+      this.log.warn(
+        'A captcha is required to log in. Open the image stored in state info.captchaImage (paste the data URL into a browser) and write the solved code to state info.captchaRequest.',
+      );
+    } catch (error) {
+      this.log.error(`Could not fetch captcha (${this.getRequestFailure(error)})`);
+    }
   }
 
   getRequestFailure(error) {
@@ -80,400 +208,140 @@ class Botslab360 extends utils.Adapter {
     return 'request failed';
   }
 
-  getSessionCookie() {
-    const session = this.session;
-    if (!session || !session.q || !session.t || !session.qid || !session.sid) {
-      return null;
-    }
-    return 'q=' + session.q + ';t=' + session.t + ';qid=' + session.qid + ';sid=' + session.sid;
-  }
-
-  async authenticate() {
-    const cookieString = String(this.config.cookieString || '').trim();
-    let cookieQ;
-    let cookieT;
-    let cookieQid;
-
-    if (cookieString) {
-      // A full cookie string was pasted: it must carry both q and t. Never mix a fresh
-      // value from the string with a stale value from the legacy single fields.
-      const parsed = parseWebSessionCookie(cookieString);
-      cookieQ = parsed.q;
-      cookieT = parsed.t;
-      cookieQid = parsed.qid;
-
-      if (!cookieQ || !cookieT) {
-        this.log.error('The pasted 360 web session cookie must contain both the q and t values');
-        return false;
+  // Re-login on an authentication failure, then run the given retry once.
+  async handleAuthFailure(retry) {
+    this.log.info('Session rejected, logging in again');
+    if (await this.login()) {
+      if (retry) {
+        await retry();
       }
     } else {
-      // Legacy fallback: separate q/t fields.
-      cookieQ = String(this.config.cookieQ || '').trim();
-      cookieT = String(this.config.cookieT || '').trim();
-
-      if (!cookieQ || !cookieT) {
-        this.log.error('Please paste the full 360 web session cookie (containing q and t) in the instance settings');
-        return false;
+      this.setState('info.connection', false, true);
+      if (this.pendingCaptcha) {
+        this.log.warn('Re-login needs a captcha: the pending request was dropped and must be repeated after solving info.captchaRequest');
       }
     }
-
-    this.log.info('Login to 360 using an existing web session');
-    return this.loginWithWebSession(cookieQ, cookieT, cookieQid);
   }
 
-  /**
-   * @param {string} cookieQ
-   * @param {string} cookieT
-   * @param {string} [explicitQid]
-   */
-  async loginWithWebSession(cookieQ, cookieT, explicitQid) {
-    const qidFromCookie = String(explicitQid || '').trim();
-    const qid = /^\d+$/.test(qidFromCookie) ? qidFromCookie : deriveQidFromCookieQ(cookieQ);
-
-    if (!qid) {
-      this.log.error('Could not determine a valid QID from the cookie');
-      return false;
-    }
-
-    return this.loginToSmartHome({
-      q: cookieQ,
-      t: cookieT,
-      qid,
-    });
-  }
-
-  async loginToSmartHome(session) {
-    const q = decodeCookieValue(session.q);
-    const t = decodeCookieValue(session.t);
-    const qid = String(session.qid || '').trim();
-
-    if (!q || !t || !/^\d+$/.test(qid) || /[\r\n]/.test(q + t)) {
-      this.log.error('360 login data is incomplete or invalid');
-      return false;
-    }
-
+  async getDeviceList(retried = false) {
     let res;
     try {
-      res = await this.requestClient({
-        method: 'post',
-        url: 'https://q.smart.360.cn/common/user/login',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: '*/*',
-          Connection: 'keep-alive',
-          Cookie: 'q=' + q + ';t=' + t + ';qid=' + qid,
-          'User-Agent': 'qhsa-iphone-11.1.0',
-          'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
-        },
-        data: new URLSearchParams({
-          clientInfo:
-            '{"release":"appstore","brand":"iPhone","model":"iPhone10,5","notifyId":"aa0ad645269de676a5ee6a728ba13b777ed3d4aa4d0e08a578097fbe78768b02","lang":"de_DE","imei":"f3bc82b802bd91a51d0dcc6499efeba3"}',
-          lang: 'de_DE',
-          phoneNum: '',
-          taskid: crypto.randomUUID(),
-        }).toString(),
+      res = await api.request(this.requestClient, {
+        region: this.config.region,
+        method: 'get',
+        path: '/v1/iot/device/list',
+        session: this.session,
+        m2: this.device.m2,
       });
     } catch (error) {
-      const failure = this.getRequestFailure(error);
-      this.log.error(`360 web session login failed (${failure}). Renew cookie Q and cookie T`);
-      return false;
-    }
-
-    const errno = Number(res.data && res.data.errno);
-    if (!Number.isFinite(errno) || errno !== 0) {
-      const errnoSuffix = Number.isFinite(errno) ? ` (errno ${errno})` : '';
-      this.log.error(`360 web session was rejected or expired${errnoSuffix}. Renew cookie Q and cookie T`);
-      return false;
-    }
-
-    if (!res.data.data || !res.data.data.sid || !res.data.data.pushKey) {
-      this.log.error('360 login response is missing required session data');
-      return false;
-    }
-
-    this.session = {
-      q,
-      t,
-      qid,
-      sid: res.data.data.sid,
-      pushKey: res.data.data.pushKey,
-    };
-
-    await this.connectTcp();
-    this.setState('info.connection', true, true);
-    this.log.info('360 web session login successful');
-    return true;
-  }
-
-  async connectTcp() {
-    this.log.debug('connectTcp');
-    //https://47.254.151.104:443
-    if (this.client) {
-      this.client.destroy();
-      this.client.connect(443, '47.254.151.104');
+      this.log.error(`Device list request failed (${this.getRequestFailure(error)})`);
       return;
     }
-    const client = new net.Socket();
-    this.client = client;
-    client.connect(443, '47.254.151.104');
-    client.on('connect', () => {
-      this.log.debug('connect');
-      const sid = this.session && this.session.sid;
-      if (!sid) {
-        this.log.error('Cannot connect to device updates because session data is missing');
-        client.destroy();
-        return;
+    if (res && AUTH_FAILURE_CODES.includes(Number(res.code))) {
+      if (!retried) {
+        await this.handleAuthFailure(() => this.getDeviceList(true));
+      } else {
+        this.log.error('Device list still unauthorized after re-login');
       }
-      this.reconnecting = false;
-      clearTimeout(this.reconnectTCP);
-      client.write(`\x00\x05\x00\x02\x00Ecv:1.7\n`);
-      client.write(`t:30\n`);
-      client.write(`u:${sid}@60009\n`);
-      client.write(`ts:${Date.now()}`);
-      // this.client.write(`\x00\x05\x00\x00\n`);
-      this.pingInterval && clearInterval(this.pingInterval);
-      this.pingInterval = setInterval(() => {
-        this.log.debug('ping');
-        client.write(`\x00\x05\x00\x00`);
-      }, 25000);
-    });
-    client.on('data', (data) => {
-      this.log.debug('data');
-      let dataString = data.toString();
-      this.log.debug(dataString);
-      if (dataString.includes('ack:') || this.buffer) {
-        try {
-          if (dataString.includes('}')) {
-            dataString = this.buffer + dataString;
-            this.buffer = '';
-          } else {
-            this.buffer += dataString;
-            return;
-          }
-          const ack = Buffer.from(dataString.substring(0, dataString.indexOf('\x00', 5)));
-          ack[3] = 4;
-          const payload = dataString.split('data":"')[1].split('",')[0];
-
-          client.write(ack.toString('latin1'), 'latin1');
-          // this.client.write(`\x00\x05\x00\x04\x00\x09ack:${ack}`);
-          // this.client.write(`\x00\x05\x00\x04\x00	ack:${ack}`);
-          // this.client.write(`\x00\x05\x00\x00`);
-          const pushKey = this.session && this.session.pushKey;
-          if (!pushKey) {
-            this.log.error('Cannot decrypt device update because session data is missing');
-            return;
-          }
-          const key = Buffer.from(pushKey.substring(0, 16)).toString('base64');
-          const decrypteds = JsCrypto.AES.decrypt(
-            new JsCrypto.CipherParams({ cipherText: JsCrypto.Base64.parse(payload) }),
-            JsCrypto.Base64.parse(key),
-            { iv: JsCrypto.Base64.parse(key), mode: JsCrypto.mode.CBC, padding: JsCrypto.pad.Pkcs7 },
-          );
-          this.log.debug(decrypteds.toString(JsCrypto.Utf8));
-          const decryptRes = JSON.parse(decrypteds.toString(JsCrypto.Utf8));
-          const body = JSON.parse(decryptRes.data);
-          this.json2iob.parse(decryptRes.sn + '.status', body.data, {
-            forceIndex: true,
-            channelName: 'Status of the device',
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.log.error(`Could not process device update: ${message}`);
-        }
-      }
-    });
-    client.on('close', () => {
-      this.log.debug('close');
-      if (this.reconnecting) {
-        return;
-      }
-      this.reconnectTCP && clearTimeout(this.reconnectTCP);
-      this.reconnectTCP = setTimeout(() => {
-        this.log.debug('reconnect');
-        this.connectTcp();
-        this.reconnecting = true;
-      }, 10000);
-    });
-    client.on('error', (error) => {
-      this.log.debug('error');
-      this.log.error(error.message);
-    });
-  }
-  async getDeviceList() {
-    const sessionCookie = this.getSessionCookie();
-    if (!sessionCookie) {
-      this.log.error('Cannot request device list because session data is missing');
       return;
     }
-    await this.requestClient({
-      method: 'post',
-      url: 'https://q.smart.360.cn/common/dev/GetList',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: '*/*',
-        Connection: 'keep-alive',
-        Cookie: sessionCookie,
-        'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
-        'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
-      },
-      data: new URLSearchParams({
-        countryId: 'DE',
-        devType: '3',
-        from: 'mpc_ios',
-        lang: 'de_DE',
-        taskid: crypto.randomUUID(),
-      }).toString(),
-    })
-      .then(async (res) => {
-        if (res.data && res.data.errno !== 0) {
-          this.log.error('Device list failed: ' + res.data.errmsg);
-          return;
-        }
-        this.log.debug(JSON.stringify(res.data));
-        if (res.data.data && res.data.data.list) {
-          this.log.info(`Found ${res.data.data.list.length} devices`);
-          for (const device of res.data.data.list) {
-            this.log.debug(JSON.stringify(device));
-            const id = device.sn;
+    if (!res || Number(res.code) !== 0) {
+      this.log.error(`Device list failed (code ${res && res.code}${res && res.msg ? ': ' + res.msg : ''})`);
+      return;
+    }
 
-            this.deviceArray.push(id);
-            const name = device.title + ' ' + device.hardware;
+    const devices = (res.data && res.data.devices) || [];
+    this.log.info(`Found ${devices.length} devices`);
+    for (const device of devices) {
+      const id = String(device.sn || device.did || device.device_id || '').trim();
+      if (!id) {
+        this.log.debug('Skipping device without an id: ' + JSON.stringify(device));
+        continue;
+      }
+      this.deviceArray.push(id);
+      const name = device.nickname || device.device_name || device.model || id;
 
-            await this.setObjectNotExistsAsync(id, {
-              type: 'device',
-              common: {
-                name: name,
-              },
-              native: {},
-            });
-            await this.setObjectNotExistsAsync(id + '.remote', {
-              type: 'channel',
-              common: {
-                name: 'Remote Controls',
-              },
-              native: {},
-            });
-
-            const remoteArray = [
-              { command: 'Refresh', name: 'True = Refresh' },
-              { command: 'start-21012', name: 'Start Charging' },
-              { command: 'smartClean-21005', name: 'Start Cleaning' },
-              { command: 'pause-21017', name: 'Pause' },
-              { command: 'continue-21017', name: 'Continue' },
-              { command: 'auto-21022', name: 'Auto Mode' },
-              { command: 'quiet-21022', name: 'Quiet Mode' },
-              { command: 'strong-21022', name: 'Strong Mode' },
-              { command: '21015', name: 'getConsumableInfo' },
-              { command: '20001', name: 'getStatus' },
-              { command: '30000', name: 'getMap' },
-            ];
-            remoteArray.forEach((remote) => {
-              this.setObjectNotExists(id + '.remote.' + remote.command, {
-                type: 'state',
-                common: {
-                  name: remote.name || '',
-                  type: remote.type || 'boolean',
-                  role: remote.role || 'boolean',
-                  def: remote.def || false,
-                  write: true,
-                  read: true,
-                },
-                native: {},
-              });
-            });
-            this.json2iob.parse(id + '.general', device, { forceIndex: true });
-          }
-        }
-      })
-      .catch((error) => {
-        this.log.error(`Device list request failed (${this.getRequestFailure(error)})`);
+      await this.setObjectNotExistsAsync(id, {
+        type: 'device',
+        common: { name },
+        native: {},
       });
-  }
+      await this.setObjectNotExistsAsync(id + '.remote', {
+        type: 'channel',
+        common: { name: 'Remote Controls' },
+        native: {},
+      });
 
-  async updateDevices() {
-    const sessionCookie = this.getSessionCookie();
-    if (!sessionCookie) {
-      this.log.error('Cannot update devices because session data is missing');
-      return;
-    }
-    const statusArray = [
-      {
-        url: 'https://q.smart.360.cn/clean/cmd/',
-        path: 'status',
-        desc: 'Status of the device',
-      },
-    ];
-
-    for (const element of statusArray) {
-      for (const device of this.deviceArray) {
-        // const url = element.url.replace("$id", id);
-
-        await this.requestClient({
-          method: 'post',
-          url: 'https://q.smart.360.cn/clean/cmd/send',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: '*/*',
-            Connection: 'keep-alive',
-            Cookie: sessionCookie,
-            'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
-            'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
+      const remoteArray = [
+        { command: 'Refresh', name: 'True = Refresh', type: 'boolean', role: 'button', def: false },
+        {
+          command: 'set_property',
+          name: 'Set properties (JSON array, e.g. [{"siid":2,"piid":2,"value":1}])',
+          type: 'string',
+          role: 'json',
+          def: '',
+        },
+        {
+          command: 'invoke_service',
+          name: 'Invoke a service (JSON, e.g. {"siid":2,"aiid":1,"params":[]})',
+          type: 'string',
+          role: 'json',
+          def: '',
+        },
+      ];
+      for (const remote of remoteArray) {
+        await this.setObjectNotExistsAsync(id + '.remote.' + remote.command, {
+          type: 'state',
+          common: {
+            name: remote.name,
+            type: remote.type,
+            role: remote.role,
+            def: remote.def,
+            write: true,
+            read: true,
           },
-          data: new URLSearchParams({
-            countryId: 'DE',
-            data: '',
-            devType: '3',
-            from: 'mpc_ios',
-            infoType: '20001',
-            lang: 'de_DE',
-            sn: device,
-            taskid: crypto.randomUUID(),
-          }).toString(),
-        })
-          .then(async (res) => {
-            this.log.debug(JSON.stringify(res.data));
-            if (!res.data) {
-              return;
-            }
-            if (res.data && res.data.errno !== 0) {
-              this.log.error('Update failed: ' + res.data.errmsg);
-              return;
-            }
-          })
-          .catch((error) => {
-            if (error.response) {
-              if (error.response.status === 401) {
-                this.log.info(element.path + ' receive 401 error. Refresh Token in 60 seconds');
-                this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
-                this.refreshTokenTimeout = setTimeout(() => {
-                  this.refreshToken();
-                }, 1000 * 60);
-
-                return;
-              }
-            }
-            this.log.error(element.url);
-            this.log.error(`Update request failed (${this.getRequestFailure(error)})`);
-          });
+          native: {},
+        });
       }
-    }
-  }
-  async refreshToken() {
-    this.log.debug('Refresh token');
-    if (!(await this.authenticate())) {
-      this.setState('info.connection', false, true);
+      this.json2iob.parse(id + '.general', device, { forceIndex: true, channelName: 'Device information' });
     }
   }
 
-  /**
-   * Is called when adapter shuts down - callback has to be called under any circumstances!
-   * @param {() => void} callback
-   */
-  onUnload(callback) {
+  async updateDevices(retried = false) {
+    for (const id of this.deviceArray) {
+      let res;
+      try {
+        res = await api.request(this.requestClient, {
+          region: this.config.region,
+          method: 'post',
+          path: '/v1/iot/device/get_info',
+          session: this.session,
+          m2: this.device.m2,
+          data: JSON.stringify({ device_id: id }),
+        });
+      } catch (error) {
+        this.log.error(`Update request failed (${this.getRequestFailure(error)})`);
+        continue;
+      }
+      if (res && AUTH_FAILURE_CODES.includes(Number(res.code))) {
+        if (!retried) {
+          await this.handleAuthFailure(() => this.updateDevices(true));
+        } else {
+          this.log.error('Device update still unauthorized after re-login');
+        }
+        return;
+      }
+      if (!res || Number(res.code) !== 0) {
+        this.log.debug(`Update for ${id} returned code ${res && res.code}`);
+        continue;
+      }
+      this.json2iob.parse(id + '.status', res.data, { forceIndex: true, channelName: 'Status of the device' });
+    }
+  }
+
+  async onUnload(callback) {
     try {
       this.setState('info.connection', false, true);
-      this.reLoginTimeout && clearTimeout(this.reLoginTimeout);
-      this.refreshTokenTimeout && clearTimeout(this.refreshTokenTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
       this.refreshTokenInterval && clearInterval(this.refreshTokenInterval);
       callback();
@@ -483,108 +351,94 @@ class Botslab360 extends utils.Adapter {
   }
 
   /**
-   * Is called if a subscribed state changes
    * @param {string} id
    * @param {ioBroker.State | null | undefined} state
    */
   async onStateChange(id, state) {
-    if (state) {
-      if (!state.ack) {
-        const sessionCookie = this.getSessionCookie();
-        if (!sessionCookie) {
-          this.log.error('Cannot send command because session data is missing');
-          return;
-        }
-        const deviceId = id.split('.')[2];
-        let command = id.split('.')[4];
-        let type = command.split('-')[1];
-        command = command.split('-')[0];
-
-        if (id.split('.')[4] === 'Refresh') {
-          this.updateDevices();
-          return;
-        }
-        let data = '';
-        if (isNaN(Number(command))) {
-          data = '{"cmd":"' + command + '"}';
-        } else {
-          type = command;
-        }
-        if (type === '21005') {
-          data = '{"mode":"smartClean","globalCleanTimes":1}';
-        }
-        if (type === '30000') {
-          data =
-            '{"cmds":[{"data":{},"infoType":"20001"},{"data":{},"infoType":"21014"},{"data":{"mask":0,"startPos":0,"userId":0},"infoType":"21011"}],"mainCmds":[]}';
-        }
-        await this.requestClient({
-          method: 'post',
-          url: 'https://q.smart.360.cn/clean/cmd/send',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: '*/*',
-            Connection: 'keep-alive',
-            Cookie: sessionCookie,
-            'User-Agent': 'QihooSuperApp_NoPods/11.1.0 (iPhone; iOS 14.8; Scale/3.00)',
-            'Accept-Language': 'de-DE;q=1, uk-DE;q=0.9, en-DE;q=0.8',
-          },
-          data: new URLSearchParams({
-            countryId: 'DE',
-            data: data,
-            devType: '3',
-            from: 'mpc_ios',
-            infoType: type,
-            lang: 'de_DE',
-            sn: deviceId,
-            taskid: crypto.randomUUID(),
-          }).toString(),
-        })
-          .then((res) => {
-            if (res.data && res.data.errno === 102) {
-              this.log.warn(res.data.errmsg);
-              this.log.info('Relogin in 10 seconds');
-              this.reLoginTimeout = setTimeout(async () => {
-                this.log.info('Start relogin');
-                if (await this.authenticate()) {
-                  this.log.info('Retry command');
-                  this.setStateAsync(id, true, false);
-                } else {
-                  this.setState('info.connection', false, true);
-                }
-              }, 1000 * 10);
-              return;
-            }
-            this.log.info(JSON.stringify(res.data));
-          })
-          .catch(async (error) => {
-            this.log.error(`Command request failed (${this.getRequestFailure(error)})`);
-          });
-      } else {
-        const resultDict = {
-          auto_target_humidity: 'setTargetHumidity',
-          enabled: 'setSwitch',
-          display: 'setDisplay',
-          child_lock: 'setChildLock',
-          level: 'setLevel-wind',
-        };
-        const idArray = id.split('.');
-        const stateName = idArray[idArray.length - 1];
-        const deviceId = id.split('.')[2];
-        if (resultDict[stateName]) {
-          const value = state.val;
-          await this.setStateAsync(deviceId + '.remote.' + resultDict[stateName], value, true);
-        }
-      }
+    if (!state || state.ack) {
+      return;
     }
+
+    if (id.endsWith('info.captchaRequest')) {
+      const code = String(state.val || '').trim();
+      if (code && this.pendingCaptcha) {
+        this.log.info('Retrying login with the provided captcha code');
+        await this.login(code);
+      }
+      return;
+    }
+
+    const deviceId = id.split('.')[2];
+    const command = id.split('.')[4];
+    if (!deviceId || !command) {
+      return;
+    }
+
+    if (command === 'Refresh') {
+      await this.updateDevices();
+      return;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(String(state.val));
+    } catch {
+      this.log.error(`${command} expects a valid JSON value`);
+      return;
+    }
+
+    let path;
+    let data;
+    if (command === 'set_property') {
+      path = '/v1/iot/device/set_property';
+      data = { device_id: deviceId, properties: payload };
+    } else if (command === 'invoke_service') {
+      path = '/v1/iot/device/invoke_service';
+      // device_id comes from the state path and must win over any device_id in the payload.
+      data = { ...payload, device_id: deviceId };
+    } else {
+      return;
+    }
+
+    await this.sendCommand(deviceId, command, path, data, false);
+  }
+
+  async sendCommand(deviceId, command, path, data, retried) {
+    let res;
+    try {
+      res = await api.request(this.requestClient, {
+        region: this.config.region,
+        method: 'post',
+        path,
+        session: this.session,
+        m2: this.device.m2,
+        data: JSON.stringify(data),
+      });
+    } catch (error) {
+      this.log.error(`${command} for ${deviceId} failed (${this.getRequestFailure(error)})`);
+      return;
+    }
+    if (res && AUTH_FAILURE_CODES.includes(Number(res.code))) {
+      if (!retried) {
+        await this.handleAuthFailure(() => this.sendCommand(deviceId, command, path, data, true));
+      } else {
+        this.log.error(`${command} for ${deviceId} still unauthorized after re-login`);
+      }
+      return;
+    }
+    if (!res || Number(res.code) !== 0) {
+      this.log.error(`${command} for ${deviceId} failed (code ${res && res.code}${res && res.msg ? ': ' + res.msg : ''})`);
+      return;
+    }
+    this.log.debug(`${command} response: ${JSON.stringify(res)}`);
   }
 }
+
 if (require.main !== module) {
-  // Export the constructor in compact mode
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
    */
   module.exports = (options) => new Botslab360(options);
 } else {
-  // otherwise start the instance directly
   new Botslab360();
 }

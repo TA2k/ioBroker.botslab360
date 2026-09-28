@@ -1,8 +1,20 @@
 {
   "common": {
     "name": "botslab360",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "news": {
+      "0.2.0": {
+        "en": "Switch to headless email/password login on the /v1 API; cookie login is no longer required",
+        "de": "Umstellung auf Headless-Login mit E-Mail/Passwort über die /v1-API; Cookie-Login wird nicht mehr benötigt",
+        "ru": "Переход на вход по email/паролю через /v1 API; вход по cookie больше не требуется",
+        "pt": "Mudança para login headless com email/senha na API /v1; o login por cookie deixou de ser necessário",
+        "nl": "Overgeschakeld naar headless e-mail/wachtwoord-login op de /v1 API; cookie-login is niet meer nodig",
+        "fr": "Passage à une connexion headless par e-mail/mot de passe via l'API /v1 ; la connexion par cookie n'est plus nécessaire",
+        "it": "Passaggio al login headless con email/password sull'API /v1; il login tramite cookie non è più necessario",
+        "es": "Cambio a inicio de sesión headless con correo/contraseña en la API /v1; ya no se necesita el inicio de sesión con cookie",
+        "pl": "Przejście na logowanie e-mail/hasło przez API /v1; logowanie przez cookie nie jest już wymagane",
+        "zh-cn": "改用 /v1 接口的邮箱/密码无界面登录；不再需要 Cookie 登录"
+      },
       "0.1.0": {
         "en": "Add login with an existing 360 web session",
         "de": "Anmeldung mit einer bestehenden 360-Websession hinzugefügt",
@@ -55,7 +67,11 @@
     },
     "authors": ["TA2k <tombox2020@gmail.com>"],
     "keywords": ["360", "Vacuum", "botslab"],
-    "license": "MIT",
+    "licenseInformation": {
+      "license": "MIT",
+      "type": "free"
+    },
+    "tier": 3,
     "platform": "Javascript/Node.js",
     "main": "main.js",
     "icon": "botslab360.png",
@@ -87,12 +103,12 @@
       }
     ]
   },
-  "encryptedNative": ["cookieString", "cookieQ", "cookieT"],
-  "protectedNative": ["cookieString", "cookieQ", "cookieT"],
+  "encryptedNative": ["password"],
+  "protectedNative": ["password"],
   "native": {
-    "cookieString": "",
-    "cookieQ": "",
-    "cookieT": "",
+    "email": "",
+    "password": "",
+    "region": "eu1",
     "interval": 10
   },
   "objects": [],
