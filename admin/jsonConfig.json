@@ -2,6 +2,23 @@
   "type": "panel",
   "i18n": false,
   "items": {
+    "server": {
+      "type": "select",
+      "sm": 12,
+      "md": 6,
+      "label": {
+        "en": "Server",
+        "de": "Server"
+      },
+      "options": [
+        { "value": "international", "label": "International (Botslab)" },
+        { "value": "china", "label": "China (360Robot)" }
+      ],
+      "help": {
+        "en": "Choose the account universe. China accounts (360Robot app) cannot log in on the international servers and vice versa.",
+        "de": "Wähle das Konto-Universum. China-Konten (360Robot-App) können sich nicht an den internationalen Servern anmelden und umgekehrt."
+      }
+    },
     "email": {
       "type": "text",
       "newLine": true,
@@ -25,6 +42,7 @@
     "region": {
       "type": "select",
       "newLine": true,
+      "hidden": "data.server === 'china'",
       "sm": 12,
       "md": 4,
       "label": {

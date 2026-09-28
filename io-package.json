@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "botslab360",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "news": {
+      "0.3.0": {
+        "en": "Add a China (360Robot / q.smart.360.cn) backend selectable via the new Server option, for accounts that cannot log in on the international servers",
+        "de": "China-Backend (360Robot / q.smart.360.cn) über die neue Server-Option hinzugefügt, für Konten, die sich nicht an den internationalen Servern anmelden können"
+      },
       "0.2.1": {
         "en": "Auto-retry other regions when the account is not found; verbose debug logging; log the captcha image inline",
         "de": "Automatischer Wechsel auf andere Regionen, wenn der Account nicht gefunden wird; ausführliche Debug-Logs; Captcha-Bild zusätzlich im Log"
@@ -110,6 +114,7 @@
   "encryptedNative": ["password"],
   "protectedNative": ["password"],
   "native": {
+    "server": "international",
     "email": "",
     "password": "",
     "region": "eu1",

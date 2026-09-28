@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { expect } = require('chai');
 const quc = require('./lib/quc');
 const api = require('./lib/api');
+const china = require('./lib/china');
 
 describe('QUC login crypto', () => {
   it('computes sig as md5 of sorted key=value pairs (uppercase before lowercase)', () => {
@@ -28,12 +29,77 @@ describe('QUC login crypto', () => {
     expect(quc.desDecryptUtf8(encrypted, key8)).to.equal(plain);
   });
 
-  it('creates a stable device identity with the expected field widths', () => {
-    const device = quc.createDeviceIdentity();
+  it('appends a backend secret to the sig base when provided', () => {
+    const params = { b: '2', a: '1' };
+    const expected = crypto.createHash('md5').update('a=1b=2secret', 'utf8').digest('hex');
 
-    expect(device.mid).to.match(/^[0-9a-f]{32}$/);
-    expect(device.androidid).to.match(/^[0-9a-f]{16}$/);
-    expect(device.m2).to.match(/^[0-9a-f-]{36}$/);
+    expect(quc.computeSig(params, 'secret')).to.equal(expected);
+  });
+
+  it('exposes distinct international and china backend descriptors', () => {
+    expect(quc.BACKENDS.international.from).to.equal('mpl_cloudsmartoem_and');
+    expect(quc.BACKENDS.international.sigSecret).to.equal('');
+    expect(quc.BACKENDS.china.from).to.equal('mpl_smarthome_and');
+    expect(quc.BACKENDS.china.sigSecret).to.equal('i7v2m5x6q');
+    expect(quc.BACKENDS.china.loginUrl()).to.equal('https://passport.360.cn/request.php');
+    expect(quc.backendFor('china').id).to.equal('china');
+    expect(quc.backendFor(undefined).id).to.equal('international');
+  });
+});
+
+describe('China device API', () => {
+  it('builds the session cookie only when all fields are present', () => {
+    expect(china.sessionCookie({ q: 'Q', t: 'T', qid: '1', sid: 'S' })).to.equal('q=Q;t=T;qid=1;sid=S');
+    expect(china.sessionCookie({ q: 'Q', t: 'T', qid: '1' })).to.equal(null);
+  });
+
+  it('maps a "<name>-<infoType>" command to a cmd payload', () => {
+    expect(china.buildCommand('start-21012')).to.deep.equal({ infoType: '21012', data: '{"cmd":"start"}' });
+  });
+
+  it('uses the numeric key itself as infoType for a poll command', () => {
+    expect(china.buildCommand('20001')).to.deep.equal({ infoType: '20001', data: '' });
+  });
+
+  it('emits the special smartClean payload for infoType 21005', () => {
+    const cmd = china.buildCommand('smartClean-21005');
+    expect(cmd.infoType).to.equal('21005');
+    expect(JSON.parse(cmd.data)).to.deep.equal({ mode: 'smartClean', globalCleanTimes: 1 });
+  });
+
+  it('reports the errno when the sid mint is rejected', async () => {
+    const http = async () => ({ data: { errno: 102, errmsg: 'expired' } });
+    const res = await china.mintSid(http, { session: { q: 'Q', t: 'T', qid: '1' } });
+
+    expect(res.errno).to.equal(102);
+    expect(res.sid).to.be.undefined;
+  });
+
+  it('returns the sid and pushKey on a successful mint', async () => {
+    const http = async () => ({ data: { errno: 0, data: { sid: 'SID', pushKey: 'PK' } } });
+    const res = await china.mintSid(http, { session: { q: 'Q', t: 'T', qid: '1' } });
+
+    expect(res.errno).to.equal(0);
+    expect(res.sid).to.equal('SID');
+    expect(res.pushKey).to.equal('PK');
+  });
+
+  it('decodes a push frame into the device sn and status', () => {
+    const pushKey = '0123456789abcdefEXTRA';
+    const keyIv = Buffer.from(pushKey.substring(0, 16));
+    const status = { battery: 90, mode: 'auto' };
+    const cipher = crypto.createCipheriv('aes-128-cbc', keyIv, keyIv);
+    const b64 = Buffer.concat([cipher.update(JSON.stringify({ sn: 'SN1', data: JSON.stringify(status) }), 'utf8'), cipher.final()]).toString('base64');
+    const frame = `\x00\x05\x00\x04{"ack":1,"data":"${b64}","x":1}`;
+
+    const decoded = china.decodePush(frame, pushKey);
+    expect(decoded.sn).to.equal('SN1');
+    expect(decoded.status).to.deep.equal(status);
+  });
+
+  it('returns null for a push frame without a data payload', () => {
+    expect(china.decodePush('{"ack":1}', 'anykey1234567890')).to.equal(null);
+    expect(china.decodePush('', 'anykey1234567890')).to.equal(null);
   });
 });
 
