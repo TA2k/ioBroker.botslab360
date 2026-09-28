@@ -84,13 +84,30 @@ describe('China device API', () => {
     expect(res.pushKey).to.equal('PK');
   });
 
+  it('rejects a mint that has a sid but no pushKey', async () => {
+    const http = async () => ({ data: { errno: 0, data: { sid: 'SID' } } });
+    const res = await china.mintSid(http, { session: { q: 'Q', t: 'T', qid: '1' } });
+
+    expect(res.errno).to.not.equal(0);
+    expect(res.sid).to.be.undefined;
+  });
+
+  it('maps an HTTP 401 to the session-expired errno', async () => {
+    const http = async () => ({ status: 401, data: '' });
+    const res = await china.getDevices(http, { session: { q: 'Q', t: 'T', qid: '1', sid: 'S' } });
+
+    expect(res.errno).to.equal(china.ERRNO_SESSION_EXPIRED);
+  });
+
   it('decodes a push frame into the device sn and status', () => {
     const pushKey = '0123456789abcdefEXTRA';
-    const keyIv = Buffer.from(pushKey.substring(0, 16));
+    const keyIv = Buffer.from(pushKey, 'utf8').subarray(0, 16);
     const status = { battery: 90, mode: 'auto' };
+    // The decrypted envelope wraps the status one level below its own data field.
+    const envelope = JSON.stringify({ sn: 'SN1', data: JSON.stringify({ data: status }) });
     const cipher = crypto.createCipheriv('aes-128-cbc', keyIv, keyIv);
-    const b64 = Buffer.concat([cipher.update(JSON.stringify({ sn: 'SN1', data: JSON.stringify(status) }), 'utf8'), cipher.final()]).toString('base64');
-    const frame = `\x00\x05\x00\x04{"ack":1,"data":"${b64}","x":1}`;
+    const b64 = Buffer.concat([cipher.update(envelope, 'utf8'), cipher.final()]).toString('base64');
+    const frame = `\x00\x05\x00\x04{"ack":1, "data": "${b64}", "x":1}`;
 
     const decoded = china.decodePush(frame, pushKey);
     expect(decoded.sn).to.equal('SN1');

@@ -34,8 +34,8 @@ class Botslab360 extends utils.Adapter {
     this.pendingCaptcha = null;
     this.started = false;
     this.pushClient = null;
-    this.pushBuffer = '';
-    this.pushReconnecting = false;
+    this.pushBuffer = Buffer.alloc(0);
+    this.pushReconnectTimeout = null;
     this.unloaded = false;
     this.json2iob = new Json2iob(this);
     this.requestClient = axios.create();
@@ -228,6 +228,9 @@ class Botslab360 extends utils.Adapter {
         return false;
       }
       this.session = { q: result.q, t: result.t, qid: result.qid, sid: mint.sid, pushKey: mint.pushKey };
+      if (this.unloaded) {
+        return false;
+      }
       this.connectChinaPush();
       return true;
     }
@@ -521,90 +524,126 @@ class Botslab360 extends utils.Adapter {
   // over a persistent TCP socket. Connect, handshake with the sid, keep alive with a ping,
   // and publish each decoded frame to <sn>.status. Reconnects on close.
   connectChinaPush() {
+    if (this.unloaded) {
+      return;
+    }
     this.log.debug('connectChinaPush');
     const sid = this.session && this.session.sid;
     if (!sid) {
       this.log.error('Cannot connect to device updates because session data is missing');
       return;
     }
-    if (this.pushClient) {
-      // Re-use the socket object across reconnects, as the original implementation did.
-      this.pushClient.destroy();
-      this.pushClient.connect(china.PUSH_PORT, china.PUSH_HOST);
+    // Tear down any previous socket and timers before opening a fresh connection.
+    this.stopPush();
+    if (this.unloaded) {
       return;
     }
+
     const client = new net.Socket();
     this.pushClient = client;
+    this.pushBuffer = Buffer.alloc(0);
     client.connect(china.PUSH_PORT, china.PUSH_HOST);
 
     client.on('connect', () => {
       this.log.debug('China push connected');
       const activeSid = this.session && this.session.sid;
-      if (!activeSid) {
-        this.log.error('Cannot connect to device updates because session data is missing');
+      if (this.unloaded || !activeSid) {
+        if (!activeSid) {
+          this.log.error('Cannot connect to device updates because session data is missing');
+        }
         client.destroy();
         return;
       }
-      this.pushReconnecting = false;
-      this.pushReconnectTimeout && clearTimeout(this.pushReconnectTimeout);
       client.write('\x00\x05\x00\x02\x00Ecv:1.7\n');
       client.write('t:30\n');
       client.write(`u:${activeSid}@60009\n`);
       client.write(`ts:${Date.now()}`);
+      // Start the keep-alive only after the handshake so it can never precede it.
       this.pushPingInterval && clearInterval(this.pushPingInterval);
       this.pushPingInterval = setInterval(() => {
         client.write('\x00\x05\x00\x00');
       }, 25000);
     });
 
-    client.on('data', (data) => {
-      let dataString = data.toString();
-      if (!dataString.includes('ack:') && !this.pushBuffer) {
-        return;
-      }
-      try {
-        // Frames can arrive split across reads; buffer until a full JSON body is seen.
-        if (dataString.includes('}')) {
-          dataString = (this.pushBuffer || '') + dataString;
-          this.pushBuffer = '';
-        } else {
-          this.pushBuffer = (this.pushBuffer || '') + dataString;
-          return;
-        }
-        // Echo the frame header back as an ack (byte 3 set to 4).
-        const ack = Buffer.from(dataString.substring(0, dataString.indexOf('\x00', 5)));
-        ack[3] = 4;
-        client.write(ack.toString('latin1'), 'latin1');
-
-        const pushKey = this.session && this.session.pushKey;
-        if (!pushKey) {
-          this.log.error('Cannot decrypt device update because session data is missing');
-          return;
-        }
-        const decoded = china.decodePush(dataString, pushKey);
-        if (decoded) {
-          this.json2iob.parse(decoded.sn + '.status', decoded.status, { forceIndex: true, channelName: 'Status of the device' });
-        }
-      } catch (error) {
-        this.log.error(`Could not process device update: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    client.on('data', (chunk) => {
+      this.pushBuffer = Buffer.concat([this.pushBuffer, chunk]);
+      this.processPushBuffer(client);
     });
 
     client.on('close', () => {
       this.log.debug('China push closed');
-      if (this.pushReconnecting || this.unloaded) {
-        return;
-      }
-      this.pushReconnectTimeout && clearTimeout(this.pushReconnectTimeout);
-      this.pushReconnectTimeout = setTimeout(() => {
-        this.pushReconnecting = true;
-        this.connectChinaPush();
-      }, 10000);
+      this.pushPingInterval && clearInterval(this.pushPingInterval);
+      this.pushPingInterval = null;
+      this.pushBuffer = Buffer.alloc(0);
+      this.schedulePushReconnect();
     });
 
     client.on('error', (error) => {
       this.log.error(`China push error: ${error.message}`);
     });
+  }
+
+  // Extract every complete frame currently buffered, ack each and publish the decoded state.
+  processPushBuffer(client) {
+    const pushKey = this.session && this.session.pushKey;
+    // The base64/JSON body is ASCII; latin1 keeps a 1:1 byte-to-char mapping for scanning.
+    let text = this.pushBuffer.toString('latin1');
+    let lastBrace = text.lastIndexOf('}');
+    while (lastBrace >= 0) {
+      const firstBrace = text.indexOf('{');
+      if (firstBrace < 0 || firstBrace > lastBrace) {
+        // A closing brace with no matching opener: drop up to it to avoid a stuck buffer.
+        this.pushBuffer = this.pushBuffer.subarray(lastBrace + 1);
+        return;
+      }
+      const frame = this.pushBuffer.subarray(0, lastBrace + 1);
+      this.pushBuffer = this.pushBuffer.subarray(lastBrace + 1);
+      try {
+        // Echo the binary header back as an ack (byte 3 set to 4), copied from the raw bytes.
+        const nul = frame.indexOf(0x00, 5);
+        if (nul > 0) {
+          const ack = Buffer.from(frame.subarray(0, nul));
+          ack[3] = 4;
+          client.write(ack);
+        }
+        if (!pushKey) {
+          this.log.error('Cannot decrypt device update because session data is missing');
+        } else {
+          const decoded = china.decodePush(frame.toString('latin1'), pushKey);
+          if (decoded) {
+            this.json2iob.parse(decoded.sn + '.status', decoded.status, { forceIndex: true, channelName: 'Status of the device' });
+          }
+        }
+      } catch (error) {
+        this.log.error(`Could not process device update: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      text = this.pushBuffer.toString('latin1');
+      lastBrace = text.lastIndexOf('}');
+    }
+  }
+
+  schedulePushReconnect() {
+    if (this.unloaded || this.pushReconnectTimeout) {
+      return;
+    }
+    this.pushReconnectTimeout = setTimeout(() => {
+      this.pushReconnectTimeout = null;
+      this.connectChinaPush();
+    }, 10000);
+  }
+
+  // Stop the push socket and all its timers.
+  stopPush() {
+    this.pushPingInterval && clearInterval(this.pushPingInterval);
+    this.pushPingInterval = null;
+    this.pushReconnectTimeout && clearTimeout(this.pushReconnectTimeout);
+    this.pushReconnectTimeout = null;
+    if (this.pushClient) {
+      this.pushClient.removeAllListeners();
+      this.pushClient.destroy();
+      this.pushClient = null;
+    }
+    this.pushBuffer = Buffer.alloc(0);
   }
 
   async onUnload(callback) {
@@ -613,9 +652,7 @@ class Botslab360 extends utils.Adapter {
       this.setState('info.connection', false, true);
       this.updateInterval && clearInterval(this.updateInterval);
       this.refreshTokenInterval && clearInterval(this.refreshTokenInterval);
-      this.pushPingInterval && clearInterval(this.pushPingInterval);
-      this.pushReconnectTimeout && clearTimeout(this.pushReconnectTimeout);
-      this.pushClient && this.pushClient.destroy();
+      this.stopPush();
       callback();
     } catch {
       callback();
